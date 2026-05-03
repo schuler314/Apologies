@@ -633,6 +633,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('room')) {
         session.roomId = String(urlParams.get('room') || '').toUpperCase();
+        session.joiningViaLink = true;
         session.isHost = false;
         document.getElementById('mode-local').classList.add('hidden');
         document.getElementById('mode-online').innerHTML = "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
@@ -726,6 +727,7 @@ let session = {
     onlineGameId: null,
     userId: null,
     isHost: false,
+    joiningViaLink: false,
     playMode: 'local',
     players: []
 };
@@ -789,6 +791,60 @@ function updateVoiceButtonUI() {
     }
 }
 
+function clearRoomQueryParam() {
+    try {
+        const url = new URL(window.location.href);
+        if (!url.searchParams.has('room')) return;
+        url.searchParams.delete('room');
+        const nextPath = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : '');
+        window.history.replaceState({}, '', nextPath);
+    } catch {}
+}
+
+function restoreModeButtonsFromJoinState() {
+    const btnLocal = document.getElementById('mode-local');
+    const btnOnline = document.getElementById('mode-online');
+    if (!btnLocal || !btnOnline) return;
+
+    btnLocal.classList.remove('hidden');
+    btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
+    btnOnline.innerHTML = "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
+}
+
+function configureLobbyRoleUI() {
+    const hostBadge = document.getElementById('host-badge');
+    const lobbyTitle = document.getElementById('lobby-title-text');
+    const qrContainer = document.getElementById('qr-container');
+    const linkContainer = document.getElementById('link-container');
+    const startBtn = document.getElementById('btn-start-online');
+
+    if (!hostBadge || !lobbyTitle || !qrContainer || !linkContainer || !startBtn) return;
+
+    if (session.isHost) {
+        hostBadge.classList.remove('hidden');
+        lobbyTitle.innerText = session.roomId ? `Room: ${session.roomId}` : 'Invite your friends!';
+        qrContainer.classList.remove('hidden');
+        linkContainer.classList.remove('hidden');
+
+        startBtn.innerHTML = 'Start Multiplayer Game <i class="fa-solid fa-play ml-1"></i>';
+        startBtn.classList.remove('bg-slate-600', 'cursor-not-allowed');
+        startBtn.classList.add('bg-emerald-600', 'hover:bg-emerald-500');
+        startBtn.disabled = false;
+        startBtn.onclick = startGame;
+    } else {
+        hostBadge.classList.add('hidden');
+        lobbyTitle.innerText = session.roomId ? `Joining Room: ${session.roomId}` : 'Joining Room...';
+        qrContainer.classList.add('hidden');
+        linkContainer.classList.add('hidden');
+
+        startBtn.innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
+        startBtn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
+        startBtn.classList.add('bg-slate-600', 'cursor-not-allowed');
+        startBtn.disabled = true;
+        startBtn.onclick = null;
+    }
+}
+
 /**
  * FULL SCREEN MODE
  */
@@ -819,6 +875,9 @@ function selectPlayMode(mode) {
     const btnLetsGo = document.getElementById('btn-lets-go');
     
     if (mode === 'local') {
+        btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
+        btnOnline.innerHTML = "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
+
         btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(5,150,105,0.4)] ring-2 ring-emerald-400 transform hover:-translate-y-0.5';
         btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
         
@@ -830,6 +889,10 @@ function selectPlayMode(mode) {
         
         buildPlayerConfigUI();
     } else {
+        btnOnline.innerHTML = session.joiningViaLink
+            ? "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>"
+            : "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
+
         btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(37,99,235,0.4)] ring-2 ring-blue-400 transform hover:-translate-y-0.5';
         btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
         
@@ -851,7 +914,6 @@ async function handleLetsGo() {
         if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
         
         session.nickname = nameInput;
-        document.getElementById('auth-section').classList.add('hidden');
         await setupOnlineLobby();
     } else {
         // "JUST ME" FLOW: Skip lobby, skip nickname, start instantly!
@@ -873,6 +935,8 @@ async function upsertMyProfile() {
 }
 
 async function createOnlineRoom() {
+    let lastRetryError = null;
+
     for (let attempt = 0; attempt < 5; attempt++) {
         const roomId = crypto.randomUUID();
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -882,10 +946,17 @@ async function createOnlineRoom() {
             .insert({ id: roomId, room_code: roomCode, host_user_id: session.userId, status: 'waiting' });
 
         if (!error) return { id: roomId, room_code: roomCode };
-        // error likely means duplicate room_code — retry with a new code
+
+        const isDuplicateCodeError = error.code === '23505' || /duplicate|unique/i.test(String(error.message || ''));
+        if (isDuplicateCodeError) {
+            lastRetryError = error;
+            continue;
+        }
+
+        throw error;
     }
 
-    throw new Error('Failed to create unique room code.');
+    throw new Error(lastRetryError?.message || 'Failed to create unique room code.');
 }
 
 async function refreshLobbyPlayersFromDB() {
@@ -1092,18 +1163,12 @@ async function setupOnlineLobby() {
 
         await upsertMyProfile();
 
+        document.getElementById('auth-section').classList.add('hidden');
         document.getElementById('lobby-section').classList.remove('hidden');
         document.getElementById('lobby-section').classList.add('flex');
+        configureLobbyRoleUI();
 
-        if (session.isHost === false && session.roomId) {
-            document.getElementById('host-badge').classList.add('hidden');
-            document.getElementById('lobby-title-text').innerText = `Joining Room: ${session.roomId}`;
-            document.getElementById('qr-container').classList.add('hidden');
-            document.getElementById('link-container').classList.add('hidden');
-            document.getElementById('btn-start-online').innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
-            document.getElementById('btn-start-online').classList.replace('bg-emerald-600', 'bg-slate-600');
-            document.getElementById('btn-start-online').classList.replace('hover:bg-emerald-500', 'cursor-not-allowed');
-            document.getElementById('btn-start-online').onclick = null;
+        if (session.joiningViaLink && session.roomId) {
 
             const { data: room, error: roomErr } = await SupabaseDB.client
                 .schema('Apologies')
@@ -1113,12 +1178,14 @@ async function setupOnlineLobby() {
                 .maybeSingle();
 
             if (roomErr || !room) {
-                showToast('Room not found. Check the invite link.', 'fa-triangle-exclamation');
-                return;
+                throw new Error('Room not found. Check the invite link.');
             }
 
             session.roomDbId = room.id;
+            session.roomId = room.room_code;
             session.isHost = room.host_user_id === session.userId;
+            session.joiningViaLink = false;
+            configureLobbyRoleUI();
 
             await SupabaseDB.client
                 .schema('Apologies')
@@ -1143,6 +1210,8 @@ async function setupOnlineLobby() {
         session.roomDbId = room.id;
         session.roomId = room.room_code;
         session.isHost = true;
+        session.joiningViaLink = false;
+        configureLobbyRoleUI();
 
         const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + session.roomId;
         window.history.pushState({ path: newUrl }, '', newUrl);
@@ -1167,6 +1236,28 @@ async function setupOnlineLobby() {
     } catch (err) {
         console.error('setupOnlineLobby error:', err);
         showToast(`Unable to set up online lobby: ${err?.message || err}`, 'fa-triangle-exclamation');
+
+        document.getElementById('auth-section').classList.remove('hidden');
+        document.getElementById('lobby-section').classList.add('hidden');
+        document.getElementById('lobby-section').classList.remove('flex');
+
+        if (onlineSync.lobbyChannel && SupabaseDB.client) {
+            SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+        }
+        onlineSync.lobbyChannel = null;
+        session.roomDbId = null;
+        session.onlineGameId = null;
+        session.players = [];
+        updateVoiceButtonUI();
+
+        if (session.roomId && !session.roomDbId) {
+            session.roomId = null;
+            session.isHost = false;
+            session.joiningViaLink = false;
+            restoreModeButtonsFromJoinState();
+            clearRoomQueryParam();
+            selectPlayMode('online');
+        }
     }
 }
 
