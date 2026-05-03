@@ -1,0 +1,1972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Apologies! 2.5D Premium</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        
+        :root {
+            --board-bg: #FDFBF7;
+            --board-border: #451a03; 
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0f172a;
+            overscroll-behavior: none; /* Prevent pull-to-refresh on mobile */
+        }
+        
+        h1, h2, h3, .font-display {
+            font-family: 'Fredoka', sans-serif;
+        }
+        
+        /* 2.5D Core Engine */
+        #board-area {
+            background: radial-gradient(circle at 50% 50%, #1e293b 0%, #020617 100%);
+        }
+        .scene { 
+            perspective: 1600px; 
+            overflow: visible; 
+        }
+        .transform-style-3d { 
+            transform-style: preserve-3d; 
+        }
+        
+        /* Unified Landscape 3D Board */
+        .board-3d { 
+            transition: transform 0.8s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.8s ease; 
+            border-radius: 16px;
+            background-color: var(--board-bg);
+            border: 8px solid var(--board-border);
+            transform: rotateX(45deg); 
+            box-shadow: 0 35px 0px 4px #291001, 0 60px 50px rgba(0,0,0,0.8); 
+        }
+        .board-cell {
+            position: absolute;
+            transform-style: preserve-3d;
+        }
+
+        /* Pawns & Highlights */
+        .pawn {
+            position: absolute;
+            width: 6.25%; height: 6.25%; 
+            display: flex; justify-content: center; align-items: flex-end; 
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), margin 0.4s ease, left 0.4s ease, top 0.4s ease;
+            transform-origin: bottom center; 
+            transform: translateZ(4px) rotateX(-45deg); /* Counter-rotate to stand perfectly upright */
+            z-index: 50; 
+            cursor: pointer;
+            pointer-events: auto; /* Forces 100% click priority on the wrapper */
+        }
+        /* Massive transparent touch-target area */
+        .pawn::before {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px; 
+            height: 80px;
+            background: transparent;
+            z-index: 1;
+        }
+        .pawn:hover {
+            z-index: 55;
+        }
+        .pawn i {
+            font-size: 40px;
+            -webkit-text-stroke: 1.5px rgba(255,255,255,0.95);
+            filter: drop-shadow(0 8px 4px rgba(0,0,0,0.6));
+            pointer-events: none; /* Passes click raycast directly to the massive ::before box */
+            z-index: 2;
+            transition: transform 0.2s ease;
+        }
+        
+        .pawn:hover i {
+            transform: scale(1.15);
+        }
+
+        .pawn-highlight {
+            animation: pulse-glow-filter 1.5s infinite;
+            cursor: pointer;
+            z-index: 60;
+        }
+        .target-highlight {
+            animation: pulse-target-filter 1s infinite;
+            cursor: pointer;
+            z-index: 60;
+        }
+        @keyframes pulse-glow-filter {
+            0%, 100% { filter: drop-shadow(0 0 6px rgba(255,255,255,0.8)) brightness(1.1); }
+            50% { filter: drop-shadow(0 0 18px #facc15) brightness(1.3); }
+        }
+        @keyframes pulse-target-filter {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(239,68,68,0.8)) brightness(1.1); }
+            50% { filter: drop-shadow(0 0 20px #ef4444) brightness(1.3); }
+        }
+
+        /* Powerups */
+        .powerup-icon { animation: float-3d 2.5s ease-in-out infinite; pointer-events: none; }
+        @keyframes float-3d {
+            0%, 100% { transform: translateZ(3px); }
+            50% { transform: translateZ(12px); }
+        }
+        .portal-icon { animation: spin-3d 6s linear infinite; pointer-events: none; }
+        @keyframes spin-3d {
+            from { transform: translateZ(3px) rotateZ(0deg); }
+            to { transform: translateZ(3px) rotateZ(360deg); }
+        }
+
+        /* Sleek Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.3); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.5); }
+
+        /* Glassmorphism Utilities */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        /* Card Styling */
+        .playing-card {
+            aspect-ratio: 5 / 7;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body class="text-slate-100 h-[100dvh] w-screen overflow-hidden flex flex-col selection:bg-emerald-500 selection:text-white">
+
+    <script>
+        // Supabase / LocalStorage Handler
+        const SUPABASE_URL = 'https://apgfskdxexlyyavmhdlg.supabase.co';
+        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_rvwuan8wg1tyegGFSt2jMA_E1CJaM5L';
+        const IS_FILE_ORIGIN = window.location.protocol === 'file:';
+
+        const SupabaseDB = {
+            client: null,
+            userId: null,
+            initialized: false,
+            initPromise: null,
+            init: async () => {
+                if (SupabaseDB.initialized) return;
+                if (SupabaseDB.initPromise) return SupabaseDB.initPromise;
+
+                SupabaseDB.initPromise = (async () => {
+                    try {
+                        if (!window.supabase || !window.supabase.createClient) {
+                            throw new Error('Supabase SDK not loaded');
+                        }
+
+                        if (IS_FILE_ORIGIN) {
+                            console.info('Running from file:// origin. Supabase may be blocked by browser CORS policies; local fallback is enabled.');
+                        }
+
+                        SupabaseDB.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+                            auth: {
+                                persistSession: true,
+                                autoRefreshToken: true,
+                                detectSessionInUrl: false
+                            }
+                        });
+
+                        let { data: { user }, error: getUserError } = await SupabaseDB.client.auth.getUser();
+                        if (getUserError) throw getUserError;
+
+                        if (!user) {
+                            const { data: anonData, error: anonError } = await SupabaseDB.client.auth.signInAnonymously();
+                            if (anonError) throw anonError;
+                            user = anonData.user;
+                        }
+
+                        SupabaseDB.userId = user ? user.id : null;
+                        SupabaseDB.initialized = true;
+                        console.log('Supabase initialized for user:', SupabaseDB.userId);
+                    } catch (err) {
+                        console.warn('Supabase init failed. Falling back to local save only.', err);
+                        SupabaseDB.client = null;
+                        SupabaseDB.userId = null;
+                        SupabaseDB.initialized = true;
+                    } finally {
+                        SupabaseDB.initPromise = null;
+                    }
+                })();
+
+                return SupabaseDB.initPromise;
+            },
+            saveGameState: async (state) => {
+                localStorage.setItem('apologies_save', JSON.stringify(state));
+
+                try {
+                    if (!SupabaseDB.initialized) await SupabaseDB.init();
+                    if (!SupabaseDB.client || !SupabaseDB.userId) return;
+
+                    const payload = {
+                        user_id: SupabaseDB.userId,
+                        status: state.status || 'playing',
+                        save_data: state,
+                        updated_at: new Date().toISOString()
+                    };
+
+                    const { error } = await SupabaseDB.client
+                        .schema('Apologies')
+                        .from('game_saves')
+                        .upsert(payload, { onConflict: 'user_id' });
+                    if (error) throw error;
+                } catch (err) {
+                    console.warn('Supabase save failed. Local save kept.', err);
+                }
+            },
+            loadGameState: async () => {
+                const localSaved = localStorage.getItem('apologies_save');
+                let localParsed = null;
+                try {
+                    localParsed = localSaved ? JSON.parse(localSaved) : null;
+                } catch {
+                    localParsed = null;
+                }
+
+                try {
+                    if (!SupabaseDB.initialized) await SupabaseDB.init();
+                    if (!SupabaseDB.client || !SupabaseDB.userId) return localParsed;
+
+                    const { data, error } = await SupabaseDB.client
+                        .schema('Apologies')
+                        .from('game_saves')
+                        .select('save_data')
+                        .eq('user_id', SupabaseDB.userId)
+                        .maybeSingle();
+
+                    if (error) throw error;
+                    return data && data.save_data ? data.save_data : localParsed;
+                } catch (err) {
+                    console.warn('Supabase load failed. Falling back to local save.', err);
+                    return localParsed;
+                }
+            },
+            clearSave: async () => {
+                localStorage.removeItem('apologies_save');
+
+                try {
+                    if (!SupabaseDB.initialized) await SupabaseDB.init();
+                    if (!SupabaseDB.client || !SupabaseDB.userId) return;
+
+                    const { error } = await SupabaseDB.client
+                        .schema('Apologies')
+                        .from('game_saves')
+                        .delete()
+                        .eq('user_id', SupabaseDB.userId);
+
+                    if (error) throw error;
+                } catch (err) {
+                    console.warn('Supabase clear failed. Local save still cleared.', err);
+                }
+            }
+        };
+    </script>
+
+    <!-- FULLSCREEN SETUP SCREEN -->
+    <div id="startup-screen" class="fixed inset-0 z-50 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-black flex flex-col items-center justify-center p-4 overflow-y-auto">
+        
+        <div class="max-w-5xl w-full">
+            <div class="text-center mb-8 lg:mb-12">
+                <h1 class="text-6xl md:text-8xl font-display font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-br from-amber-300 via-amber-400 to-amber-600 drop-shadow-[0_0_20px_rgba(251,191,36,0.3)] filter">
+                    APOLOGIES!
+                </h1>
+                <p class="text-sm md:text-lg font-bold text-emerald-400 mt-2 tracking-[0.3em] uppercase opacity-90">Premium 2.5D Edition</p>
+            </div>
+
+            <div class="glass-panel p-6 lg:p-10 rounded-3xl shadow-2xl md:grid md:grid-cols-2 md:gap-12 items-stretch relative">
+                
+                <!-- Left Column: Settings, Auth & Actions -->
+                <div class="flex flex-col gap-8 h-full">
+                    
+                    <!-- Who is playing? -->
+                    <div id="auth-section" class="bg-slate-800/50 p-5 md:p-6 rounded-2xl border border-slate-700/50 shadow-inner">
+                        <div class="flex items-center gap-2 mb-5">
+                            <div class="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs"><i class="fa-solid fa-1"></i></div>
+                            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Who is playing?</h2>
+                        </div>
+                        
+                        <div class="flex gap-3 mb-6">
+                            <button id="mode-local" onclick="selectPlayMode('local')" class="flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(5,150,105,0.4)] ring-2 ring-emerald-400 transform hover:-translate-y-0.5">
+                                Just Me <i class="fa-solid fa-user ml-1 opacity-70"></i>
+                            </button>
+                            <button id="mode-online" onclick="selectPlayMode('online')" class="flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600">
+                                Friends <i class="fa-solid fa-users ml-1 opacity-70"></i>
+                            </button>
+                        </div>
+                        
+                        <div id="nickname-section" class="relative transition-all duration-300">
+                            <label class="text-xs text-slate-400 font-semibold mb-2 block ml-1">Your Nickname</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-id-card absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                                <input type="text" id="player-nickname" placeholder="e.g. Explorer Timmy" class="w-full bg-slate-900/80 text-white font-medium text-sm pl-10 pr-4 py-3 rounded-xl border border-slate-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500 transition-all shadow-inner">
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Let's Go Button -->
+                        <button id="btn-lets-go" onclick="handleLetsGo()" class="w-full mt-6 py-4 text-white text-lg font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1">
+                            <!-- Text injected via JS -->
+                        </button>
+                        
+                        <div id="resume-container" class="hidden mt-4">
+                            <button onclick="resumeGame()" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-xl border border-slate-500 transition-all flex justify-center items-center gap-2">
+                                <i class="fa-solid fa-clock-rotate-left"></i> Resume Saved Game
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lobby Section (Hidden Initially) -->
+                    <div id="lobby-section" class="hidden bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 text-center flex-col items-center relative shadow-lg">
+                        <div class="absolute -top-3 left-1/2 -translate-x-1/2">
+                            <span id="host-badge" class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[10px] font-bold px-4 py-1 rounded-full shadow-lg border border-purple-400/50 uppercase tracking-widest"><i class="fa-solid fa-crown mr-1"></i> Lobby Host</span>
+                        </div>
+                        
+                        <h3 class="text-sm font-bold text-slate-300 mt-2 mb-4" id="lobby-title-text">Invite your friends!</h3>
+                        
+                        <div class="bg-white p-3 rounded-2xl mb-5 inline-block shadow-[0_0_20px_rgba(255,255,255,0.1)]" id="qr-container">
+                            <img id="lobby-qr" src="" class="w-32 h-32 md:w-36 md:h-36 object-contain rounded-lg">
+                        </div>
+                        
+                        <div class="w-full flex gap-2 mb-5" id="link-container">
+                            <input type="text" id="lobby-url" readonly class="flex-1 bg-slate-900/80 text-slate-400 text-xs px-4 py-2.5 rounded-xl border border-slate-700 outline-none font-mono shadow-inner text-center">
+                            <button onclick="copyRoomLink()" class="px-5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold transition-colors shadow-lg" title="Copy"><i class="fa-regular fa-copy"></i></button>
+                        </div>
+
+                        <div class="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-4 text-left mb-5 shadow-inner">
+                            <h4 class="text-slate-400 font-semibold text-xs mb-3 uppercase tracking-wider flex items-center"><i class="fa-solid fa-users mr-2"></i> Connected Players</h4>
+                            <ul id="lobby-players" class="space-y-2">
+                                <!-- Injected via JS -->
+                            </ul>
+                        </div>
+                        
+                        <button id="btn-start-online" onclick="startGame()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold rounded-xl transition-all shadow-[0_8px_20px_-6px_rgba(16,185,129,0.5)] transform hover:-translate-y-1">
+                            Start Multiplayer Game <i class="fa-solid fa-play ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Player Setup -->
+                <div class="mt-8 md:mt-0 h-full flex flex-col">
+                    <div class="flex justify-between items-center mb-6">
+                        <div class="flex items-center gap-2">
+                            <div class="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs"><i class="fa-solid fa-gear"></i></div>
+                            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Player Configuration</h2>
+                        </div>
+                        <button onclick="toggleInstructions(true)" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-600 transition-colors font-medium flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-book-open text-blue-400"></i> Rules
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-3 flex-1" id="player-config">
+                        <!-- Injected via JS -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN GAME UI (Forced Landscape Structure) -->
+    <div id="main-game-ui" class="hidden flex-row h-[100dvh] w-full overflow-hidden bg-slate-950">
+        
+        <!-- Game Board Area -->
+        <div id="board-area" class="flex-1 h-full flex justify-center items-center overflow-hidden min-w-0 min-h-0">
+            
+            <!-- Scaler precisely scales the unscaled 3D box to fit 10px within the flex container bounds -->
+            <div id="board-scaler" class="transform-style-3d">
+                <div class="scene transform-style-3d" style="perspective: 1600px; width: 1000px; height: 1000px;">
+                    <!-- Shifter perfectly offsets the 3D projection's bottom-heavy visual bias to ensure the visual center matches the DOM center -->
+                    <div id="board-shifter" class="transform-style-3d" style="transform: translateY(-101.5px); width: 100%; height: 100%;">
+                        
+                        <div id="board-container" class="board-3d relative transform-style-3d shrink-0" style="width: 100%; height: 100%;">
+                            <!-- Inner Board Grid Area (to keep borders clean) -->
+                            <div class="absolute inset-0 m-[2%] rounded-lg overflow-hidden transform-style-3d pointer-events-none">
+                                <div class="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                                <div id="slides-layer" class="absolute inset-0 transform-style-3d z-10"></div>
+                            </div>
+                            <!-- Cells & Pawns injected here -->
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- UI / Controls Sidebar (Locked fixed width on the right side) -->
+        <div class="w-[240px] md:w-[320px] lg:w-[360px] shrink-0 glass-panel flex flex-col border-l border-slate-700/50 shadow-[-10px_0_30px_rgba(0,0,0,0.6)] z-40 relative h-full">
+            
+            <div class="relative bg-slate-900/50 border-b border-slate-700/50">
+                <div id="turn-banner" class="py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis">
+                    Preparing Board...
+                </div>
+                <!-- Action Buttons -->
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1.5 md:gap-2">
+                    <button onclick="toggleFullScreen()" id="fullscreen-btn" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Toggle Fullscreen">
+                        <i class="fa-solid fa-expand text-xs md:text-sm"></i>
+                    </button>
+                    <button onclick="saveGame()" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Quick Save">
+                        <i class="fa-solid fa-floppy-disk text-xs md:text-sm"></i>
+                    </button>
+                    <button onclick="togglePause(true)" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Menu / Pause">
+                        <i class="fa-solid fa-bars text-xs md:text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col p-3 md:p-5 overflow-hidden gap-3 md:gap-5">
+                
+                <!-- Deck Area -->
+                <div class="flex justify-around items-center bg-slate-900/40 p-3 md:p-5 rounded-2xl border border-slate-700/50 shrink-0 shadow-inner">
+                    <div class="flex flex-col items-center">
+                        <span class="text-[9px] md:text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><i class="fa-solid fa-layer-group"></i> Deck (<span id="deck-count">102</span>)</span>
+                        <!-- Deck Button -->
+                        <div id="deck" onclick="handleDeckClick()" class="playing-card w-[70px] md:w-20 lg:w-24 bg-gradient-to-br from-indigo-800 to-blue-900 border-2 border-indigo-400/30 rounded-xl cursor-pointer flex justify-center items-center relative overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]">
+                            <div class="absolute inset-1 border border-dashed border-white/20 rounded-lg pointer-events-none"></div>
+                            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.1)_0,transparent_100%)] pointer-events-none"></div>
+                            <span class="font-display text-blue-200/50 font-bold tracking-widest rotate-[-45deg] text-[10px] md:text-xs shadow-sm pointer-events-none">APOLOGIES</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex flex-col items-center">
+                        <span class="text-[9px] md:text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><i class="fa-regular fa-hand"></i> Active</span>
+                        <div id="active-card" class="playing-card w-[70px] md:w-20 lg:w-24 bg-white border border-slate-200 rounded-xl flex flex-col justify-center items-center text-center p-1.5 opacity-0 transition-all duration-500 transform scale-95 pointer-events-none">
+                            <span id="card-val" class="font-display text-3xl md:text-5xl font-bold text-slate-800 mb-0.5 pointer-events-none"></span>
+                            <span id="card-desc" class="text-[8px] md:text-[10px] leading-tight text-slate-600 font-medium px-1 pointer-events-none"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="action-prompt" class="text-center font-bold text-xs md:text-sm text-amber-400 h-5 shrink-0 flex items-center justify-center tracking-wide"></div>
+
+                <!-- Game Log -->
+                <div class="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-700/50 overflow-hidden shadow-inner min-h-[100px]">
+                    <div class="bg-slate-800/80 py-2 px-3 md:px-4 text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest flex justify-between shrink-0 border-b border-slate-700/50 items-center">
+                        <span>Action Log</span>
+                        <div class="flex gap-1.5">
+                            <span class="bg-blue-500/20 text-blue-400 px-1 rounded"><i class="fa-solid fa-bolt"></i></span>
+                            <span class="bg-purple-500/20 text-purple-400 px-1 rounded"><i class="fa-solid fa-hurricane"></i></span>
+                        </div>
+                    </div>
+                    <div id="game-log" class="flex-1 overflow-y-auto p-3 md:p-4 text-[10px] md:text-xs space-y-2 md:space-y-2.5 text-slate-300 font-medium">
+                        <!-- Logs injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Win Overlay -->
+        <div id="win-screen" class="absolute inset-0 bg-slate-900/95 hidden flex-col justify-center items-center z-50 p-6 text-center backdrop-blur-md">
+            <div class="animate-bounce mb-4"><i class="fa-solid fa-trophy text-6xl text-amber-400 drop-shadow-[0_0_15px_rgba(251,191,36,0.6)]"></i></div>
+            <h2 class="text-5xl md:text-7xl font-display font-bold text-white mb-2 drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]">Victory!</h2>
+            <p id="win-message" class="text-3xl md:text-4xl text-emerald-400 font-display font-bold mb-10 tracking-wider"></p>
+            <button onclick="clearSaveAndReload()" class="px-10 py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold text-xl rounded-2xl shadow-[0_10px_25px_-5px_rgba(16,185,129,0.5)] transition-all transform hover:-translate-y-1">Return to Menu</button>
+        </div>
+    </div>
+
+    <!-- Card Presentation Modal -->
+    <div id="card-modal" class="fixed inset-0 z-[130] bg-slate-900/80 hidden flex-col justify-center items-center p-4 backdrop-blur-md opacity-0 transition-opacity duration-300">
+        <div class="playing-card w-[280px] md:w-[320px] bg-white border-4 border-slate-200 rounded-3xl flex flex-col justify-center items-center text-center p-6 shadow-2xl transform scale-95 transition-transform duration-300 relative" id="card-modal-content">
+            <div class="absolute inset-2 border-2 border-dashed border-slate-200 rounded-2xl pointer-events-none"></div>
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 z-10">You Drew</span>
+            <span id="modal-card-val" class="font-display text-[100px] md:text-[120px] font-bold leading-none mb-2 pointer-events-none drop-shadow-md z-10"></span>
+            <span id="modal-card-desc" class="text-sm md:text-base leading-snug text-slate-600 font-medium px-2 mt-4 z-10 pointer-events-none"></span>
+            <button id="modal-card-btn" class="mt-8 px-8 py-4 w-full text-white font-bold rounded-xl transition-all transform hover:-translate-y-0.5 z-10"></button>
+        </div>
+    </div>
+
+    <!-- Choice Selection Modal -->
+    <div id="choice-modal" class="fixed inset-0 z-[140] bg-slate-900/80 hidden flex-col justify-center items-center p-4 backdrop-blur-md opacity-0 transition-opacity duration-300">
+        <div class="glass-panel border border-slate-600/50 rounded-3xl shadow-2xl p-8 text-center transform scale-95 transition-transform duration-300 max-w-sm w-full" id="choice-content">
+            <div class="mb-6 flex justify-center">
+                <div class="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xl shadow-inner border border-blue-500/30">
+                    <i class="fa-solid fa-code-branch"></i>
+                </div>
+            </div>
+            <h3 class="text-2xl font-display font-bold text-white mb-6 tracking-wider drop-shadow-sm">Choose Your Move</h3>
+            
+            <div class="flex flex-col gap-4" id="choice-buttons">
+                <!-- Buttons injected via JS -->
+            </div>
+            
+            <button onclick="cancelChoice()" class="mt-6 w-full py-2 text-sm font-semibold text-slate-400 hover:text-white border border-transparent hover:border-slate-600 rounded-lg transition-all">
+                Cancel Selection
+            </button>
+        </div>
+    </div>
+
+    <!-- Pause/Menu Modal -->
+    <div id="pause-modal" class="fixed inset-0 z-[110] bg-slate-900/80 hidden flex-col justify-center items-center p-4 backdrop-blur-md opacity-0 transition-opacity duration-300">
+        <div class="glass-panel border border-slate-600/50 rounded-3xl shadow-2xl p-8 text-center transform scale-95 transition-transform duration-300 max-w-sm w-full" id="pause-content">
+            <h3 class="text-2xl font-display font-bold text-white mb-8 tracking-wider"><i class="fa-solid fa-pause text-emerald-400 mr-2"></i> Game Paused</h3>
+            
+            <div class="flex flex-col gap-4">
+                <button onclick="togglePause(false)" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg text-lg transform hover:-translate-y-0.5">
+                    Resume Game
+                </button>
+                <button onclick="toggleInstructions(true)" class="w-full py-3.5 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-all shadow-lg text-lg transform hover:-translate-y-0.5">
+                    How to Play
+                </button>
+                <div class="h-px w-full bg-slate-700/50 my-2"></div>
+                <button onclick="quitGame()" class="w-full py-3.5 bg-rose-600/90 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-lg text-lg transform hover:-translate-y-0.5">
+                    Save & Quit to Menu
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instructions Modal -->
+    <div id="instructions-modal" class="fixed inset-0 z-[120] bg-slate-900/80 hidden flex-col justify-center items-center p-4 md:p-8 backdrop-blur-md opacity-0 transition-opacity duration-300">
+        <div class="glass-panel border border-slate-600/50 rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90dvh] flex flex-col overflow-hidden transform scale-95 transition-transform duration-300" id="instructions-content">
+            
+            <div class="p-5 md:p-6 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/50 shrink-0">
+                <h2 class="text-2xl md:text-3xl font-display font-bold text-amber-400 tracking-wider flex items-center gap-3"><i class="fa-solid fa-book-open"></i> Player Guide</h2>
+                <button onclick="toggleInstructions(false)" class="w-10 h-10 flex items-center justify-center rounded-full bg-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-600 transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 md:p-8 overflow-y-auto text-slate-300 flex-1 md:grid md:grid-cols-2 gap-8 md:gap-10">
+                <div class="space-y-8">
+                    <section>
+                        <h3 class="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Objective</h3>
+                        <p class="text-sm leading-relaxed text-slate-300 bg-slate-800/30 p-4 rounded-xl border border-slate-700/30">Be the first player to move all four pawns from your Start space to your Home space. Pawns move clockwise based on the drawn card.</p>
+                    </section>
+                    <section>
+                        <h3 class="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><i class="fa-solid fa-door-open"></i> Leaving Start</h3>
+                        <p class="text-sm leading-relaxed text-slate-300 bg-slate-800/30 p-4 rounded-xl border border-slate-700/30">Draw a <span class="font-bold text-white bg-emerald-600/80 px-2 py-0.5 rounded shadow-sm">1</span> or <span class="font-bold text-white bg-emerald-600/80 px-2 py-0.5 rounded shadow-sm">2</span> to move a pawn out of Start. Drawing a <span class="font-bold text-white bg-emerald-600/80 px-2 py-0.5 rounded shadow-sm">2</span> grants an extra turn!</p>
+                    </section>
+                    <section>
+                        <h3 class="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><i class="fa-solid fa-star"></i> Special Action Cards</h3>
+                        <ul class="text-sm space-y-3 mt-2 text-slate-300">
+                            <li class="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30"><span class="font-bold text-orange-400 font-display text-base tracking-wide">6 EARTHQUAKE:</span> Move 6. Opponents on board are knocked back 1 space!</li>
+                            <li class="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30"><span class="font-bold text-red-500 font-display text-base tracking-wide">9 BULLDOZER:</span> Move 9. Bump ANY opponent pawns you pass through!</li>
+                            <li class="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30"><span class="font-bold text-rose-400 font-display text-base tracking-wide">13 APOLOGIES!:</span> Swap a pawn from Start with an opponent's, bumping them.</li>
+                            <li class="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30"><span class="font-bold text-emerald-400 font-display text-base tracking-wide">14 SAFETY DASH:</span> Move from Start straight to your Safety Zone entrance.</li>
+                        </ul>
+                    </section>
+                </div>
+                
+                <div class="space-y-8 mt-8 md:mt-0">
+                    <section>
+                        <h3 class="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><i class="fa-solid fa-car-burst"></i> Bumps & Slides</h3>
+                        <div class="bg-slate-800/30 p-4 rounded-xl border border-slate-700/30 space-y-3 text-sm text-slate-300">
+                            <p>Land on an opponent's pawn to <span class="font-bold text-rose-400">bump</span> them back to Start.</p>
+                            <p>Land on the start of a slide (not your color) to automatically slide to the end, violently bumping ANY pawns in your path!</p>
+                        </div>
+                    </section>
+                    <section>
+                        <h3 class="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><i class="fa-solid fa-map-location-dot"></i> Powerups & Hazards</h3>
+                        <ul class="text-sm space-y-3 mt-2 text-slate-300">
+                            <li class="flex items-center bg-slate-800/30 p-3 rounded-xl border border-slate-700/30">
+                                <div class="w-8 flex justify-center mr-2"><i class="fa-solid fa-bolt text-blue-400 text-lg"></i></div> 
+                                <div><span class="font-bold text-blue-300">Springboards:</span> Launch forward <span class="font-bold">+4 spaces</span>.</div>
+                            </li>
+                            <li class="flex items-center bg-slate-800/30 p-3 rounded-xl border border-slate-700/30">
+                                <div class="w-8 flex justify-center mr-2"><i class="fa-solid fa-hurricane text-purple-400 text-lg"></i></div> 
+                                <div><span class="font-bold text-purple-300">Portals:</span> Warp instantly to the connected portal!</div>
+                            </li>
+                            <li class="flex items-center bg-slate-800/30 p-3 rounded-xl border border-slate-700/30">
+                                <div class="w-8 flex justify-center mr-2"><i class="fa-solid fa-triangle-exclamation text-red-400 text-lg"></i></div> 
+                                <div><span class="font-bold text-red-300">Mud Pits:</span> Get stuck and dragged back <span class="font-bold">-4 spaces</span>.</div>
+                            </li>
+                            <li class="flex items-center bg-slate-800/30 p-3 rounded-xl border border-slate-700/30">
+                                <div class="w-8 flex justify-center mr-2"><i class="fa-solid fa-skull text-stone-400 text-lg"></i></div> 
+                                <div><span class="font-bold text-stone-300">Trapdoors:</span> Fall completely back to <span class="font-bold text-white">Start</span>!</div>
+                            </li>
+                        </ul>
+                    </section>
+                </div>
+            </div>
+            
+            <div class="p-5 border-t border-slate-700/50 bg-slate-800/50 text-center shrink-0">
+                <button onclick="toggleInstructions(false)" class="px-12 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold rounded-xl transition-all shadow-[0_5px_15px_-3px_rgba(16,185,129,0.4)] transform hover:-translate-y-0.5">Understood</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * INITIALIZATION & SETUP UI
+ */
+document.addEventListener('DOMContentLoaded', async () => {
+    
+    // MATHEMATICAL 3D BOARD AUTO-SCALER 
+    // Dynamically scales the exact 3D visual bounding box footprint to perfectly hit 10px flex-container padding!
+    const boardArea = document.getElementById('board-area');
+    const boardScaler = document.getElementById('board-scaler');
+    
+    const resizeBoard = () => {
+        if (!boardArea || !boardScaler) return;
+        const cw = boardArea.clientWidth - 20;  // 10px padding constraint
+        const ch = boardArea.clientHeight - 20; // 10px padding constraint
+
+        // The precise visual bounding box footprint of a 1000px board at 45deg & 1600px perspective
+        const boxW = 1283; 
+        const boxH = 782;  
+
+        const scale = Math.min(cw / boxW, ch / boxH);
+        boardScaler.style.transform = `scale(${scale})`;
+    };
+    
+    const ro = new ResizeObserver(resizeBoard);
+    if(boardArea) ro.observe(boardArea);
+    resizeBoard();
+
+
+    // Automatically initialize layout to 'local' configuration on startup
+    selectPlayMode('local');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('room')) {
+        session.roomId = urlParams.get('room');
+        session.isHost = false;
+        document.getElementById('mode-local').classList.add('hidden');
+        document.getElementById('mode-online').innerHTML = "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
+        selectPlayMode('online');
+    }
+    
+    SupabaseDB.init();
+    
+    let saved = await SupabaseDB.loadGameState();
+    if (saved && saved.status === 'playing') {
+        document.getElementById('resume-container').classList.remove('hidden');
+    }
+    
+    document.addEventListener('fullscreenchange', () => {
+        const btnIcon = document.querySelector('#fullscreen-btn i');
+        if (document.fullscreenElement) {
+            btnIcon.className = 'fa-solid fa-compress text-xs md:text-sm';
+        } else {
+            btnIcon.className = 'fa-solid fa-expand text-xs md:text-sm';
+        }
+    });
+});
+
+/**
+ * CORE CONFIGURATION & CONSTANTS
+ */
+const COLORS = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+
+const COLOR_CODES = {
+    'RED': { bg: 'bg-rose-500', hex: '#f43f5e', text: 'text-rose-500', border: 'border-rose-500', start: {x: 3.4, y: 2}, home: {x: 1.5, y: 6}, entry: 4, exit: 2 },
+    'BLUE': { bg: 'bg-blue-500', hex: '#3b82f6', text: 'text-blue-500', border: 'border-blue-500', start: {x: 11.8, y: 3.4}, home: {x: 8, y: 1.5}, entry: 19, exit: 17 },
+    'YELLOW': { bg: 'bg-amber-400', hex: '#fbbf24', text: 'text-amber-500', border: 'border-amber-400', start: {x: 10.4, y: 11.8}, home: {x: 12.5, y: 8}, entry: 34, exit: 32 },
+    'GREEN': { bg: 'bg-emerald-500', hex: '#10b981', text: 'text-emerald-500', border: 'border-emerald-500', start: {x: 2, y: 10.4}, home: {x: 6, y: 12.5}, entry: 49, exit: 47 }
+};
+
+const POWERUPS = { SPRINGS: [5, 20, 35, 50], MUDS: [14, 29, 44, 59], PORTALS: [8, 38], TRAPDOORS: [27, 57] };
+
+const DECK_TEMPLATE = [
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+    2, 2, 2, 2, 2, 2, 2, 2,       
+    3, 3, 3, 3, 3, 3, 3, 3,       
+    4, 4, 4, 4, 4, 4, 4, 4,       
+    5, 5, 5, 5, 5, 5, 5, 5,       
+    6, 6, 6, 6,                   
+    7, 7, 7, 7, 7, 7, 7, 7,       
+    8, 8, 8, 8, 8, 8, 8, 8,       
+    9, 9, 9, 9,                   
+    10, 10, 10, 10, 10, 10, 10, 10,
+    11, 11, 11, 11, 11, 11, 11, 11, 
+    12, 12, 12, 12, 12, 12, 12, 12, 
+    13, 13, 13, 13, 13, 13, 13, 13, 
+    14, 14, 14, 14                
+];
+
+const CARD_DESCRIPTIONS = {
+    1: "Move 1 space forward or move out of Start.",
+    2: "Move 2 spaces forward or out of Start. DRAW AGAIN.",
+    3: "Move 3 spaces forward.",
+    4: "Move 4 spaces BACKWARD.",
+    5: "Move 5 spaces forward.",
+    6: "EARTHQUAKE! Move 6 spaces forward. All opponents knocked back 1 space.",
+    7: "Move 7 spaces forward.",
+    8: "Move 8 spaces forward.",
+    9: "BULLDOZER! Move 9 forward. Bump ANY pawns you pass through!",
+    10: "Move 10 spaces forward or 1 space backward.",
+    11: "Move 11 spaces forward.",
+    12: "Move 12 spaces forward.",
+    13: "APOLOGIES! Swap pawn from Start with opponent's space, bumping them.",
+    14: "SAFETY DASH! Move a pawn directly from Start to Safety Zone entrance."
+};
+
+const SLIDES = [
+    { start: 1, end: 4, color: 'RED' }, { start: 9, end: 13, color: 'RED' },
+    { start: 16, end: 19, color: 'BLUE' }, { start: 24, end: 28, color: 'BLUE' },
+    { start: 31, end: 34, color: 'YELLOW' }, { start: 39, end: 43, color: 'YELLOW' },
+    { start: 46, end: 49, color: 'GREEN' }, { start: 54, end: 58, color: 'GREEN' }
+];
+
+/**
+ * STATE MANAGEMENT
+ */
+let gameState = {
+    status: 'setup', players: [], turn: 0, deck: [], discard: [], currentCard: null, selectedPawnForSorry: null
+};
+let session = { nickname: '', roomId: null, isHost: false, playMode: 'local', players: [] };
+let isPaused = false;
+
+/**
+ * FULL SCREEN MODE
+ */
+function toggleFullScreen() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().then(() => {
+            if(screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock("landscape").catch(e => console.log("Orientation lock unsupported"));
+            }
+        }).catch(err => {
+            showToast(`Error attempting to enable full-screen.`, "fa-triangle-exclamation");
+        });
+    } else {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        }
+    }
+}
+
+/**
+ * AUTH & MULTIPLAYER LOBBY LOGIC
+ */
+function selectPlayMode(mode) {
+    session.playMode = mode;
+    const btnLocal = document.getElementById('mode-local');
+    const btnOnline = document.getElementById('mode-online');
+    const nicknameSection = document.getElementById('nickname-section');
+    const btnLetsGo = document.getElementById('btn-lets-go');
+    
+    if (mode === 'local') {
+        btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(5,150,105,0.4)] ring-2 ring-emerald-400 transform hover:-translate-y-0.5';
+        btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
+        
+        // Hide Nickname Input For "Just Me" Local Mode
+        nicknameSection.classList.add('hidden', 'opacity-0');
+        
+        btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1';
+        btnLetsGo.innerHTML = 'Start Game <i class="fa-solid fa-play ml-1 text-sm"></i>';
+        
+        buildPlayerConfigUI();
+    } else {
+        btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(37,99,235,0.4)] ring-2 ring-blue-400 transform hover:-translate-y-0.5';
+        btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
+        
+        // Show Nickname Input For Friends Mode
+        nicknameSection.classList.remove('hidden', 'opacity-0');
+        
+        btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1';
+        btnLetsGo.innerHTML = 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>';
+        
+        buildPlayerConfigUI();
+    }
+}
+
+function handleLetsGo() {
+    if (session.playMode === 'online') {
+        const nameInput = document.getElementById('player-nickname').value.trim();
+        if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
+        
+        session.nickname = nameInput;
+        document.getElementById('auth-section').classList.add('hidden');
+        setupOnlineLobby();
+    } else {
+        // "JUST ME" FLOW: Skip lobby, skip nickname, start instantly!
+        session.nickname = 'You';
+        startGame(); 
+    }
+}
+
+function setupOnlineLobby() {
+    document.getElementById('lobby-section').classList.remove('hidden');
+    document.getElementById('lobby-section').classList.add('flex');
+    
+    if (session.isHost === false && session.roomId) {
+        document.getElementById('host-badge').classList.add('hidden');
+        document.getElementById('lobby-title-text').innerText = `Joining Room: ${session.roomId}`;
+        document.getElementById('qr-container').classList.add('hidden');
+        document.getElementById('link-container').classList.add('hidden');
+        document.getElementById('btn-start-online').innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
+        document.getElementById('btn-start-online').classList.replace('bg-emerald-600', 'bg-slate-600');
+        document.getElementById('btn-start-online').classList.replace('hover:bg-emerald-500', 'cursor-not-allowed');
+        document.getElementById('btn-start-online').onclick = null;
+        
+        session.players = [{ id: 'p1', name: session.nickname, isHost: false }];
+        renderLobbyPlayers();
+        buildPlayerConfigUI();
+        showToast("Connected to Room!");
+    } else {
+        session.roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        session.isHost = true;
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + session.roomId;
+        window.history.pushState({path:newUrl},'',newUrl);
+        
+        document.getElementById('lobby-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(newUrl)}`;
+        document.getElementById('lobby-url').value = newUrl;
+        
+        session.players = [{ id: 'host', name: session.nickname, isHost: true }];
+        renderLobbyPlayers();
+        buildPlayerConfigUI();
+        
+        setTimeout(() => {
+            if(gameState.status === 'setup' && session.isHost) {
+                session.players.push({ id: 'friend1', name: 'Friend Bob', isHost: false });
+                renderLobbyPlayers();
+                buildPlayerConfigUI(); 
+                showToast("Friend Bob joined the room!", "fa-user-plus");
+            }
+        }, 3000);
+    }
+}
+
+function renderLobbyPlayers() {
+    const list = document.getElementById('lobby-players');
+    list.innerHTML = session.players.map(p => `
+        <li class="bg-slate-800/80 px-4 py-2.5 rounded-lg text-sm font-semibold text-slate-200 flex justify-between items-center border border-slate-700/50 shadow-sm">
+            <span class="flex items-center gap-2"><div class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-xs"><i class="fa-solid fa-user text-slate-400"></i></div> ${p.name}</span>
+            ${p.isHost ? '<span class="text-[9px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Host</span>' : ''}
+        </li>
+    `).join('');
+}
+
+function buildPlayerConfigUI() {
+    const container = document.getElementById('player-config');
+    container.innerHTML = '';
+    
+    COLORS.forEach((color) => {
+        let optionsHTML = '';
+        
+        if (session.playMode === 'local') {
+             optionsHTML += `<option value="HUMAN">You</option>`;
+        } else {
+             session.players.forEach(p => {
+                 optionsHTML += `<option value="PLAYER_${p.id}">${p.name}</option>`;
+             });
+        }
+        
+        optionsHTML += `<option value="CPU">CPU AI</option><option value="NONE">None</option>`;
+        
+        container.innerHTML += `
+            <div class="flex items-center justify-between p-3.5 bg-slate-800/50 rounded-xl border border-slate-700/50 shadow-sm transition-all hover:border-slate-600">
+                <div class="flex items-center gap-3">
+                    <div class="w-6 h-6 rounded-full ${COLOR_CODES[color].bg} shadow-[0_0_10px_${COLOR_CODES[color].hex}] border-2 border-white/20"></div>
+                    <span class="font-bold text-slate-200 tracking-wider text-sm">${color}</span>
+                </div>
+                <select id="config-${color}" class="bg-slate-900/80 border border-slate-600 text-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-inner cursor-pointer">
+                    ${optionsHTML}
+                </select>
+            </div>
+        `;
+    });
+
+    // 1 HUMAN VS 3 CPU DEFAULT SETUP FOR LOCAL PLAY 
+    if (session.playMode === 'local') {
+        document.getElementById(`config-RED`).value = 'HUMAN';
+        document.getElementById(`config-BLUE`).value = 'CPU';
+        document.getElementById(`config-YELLOW`).value = 'CPU';
+        document.getElementById(`config-GREEN`).value = 'CPU';
+    } else if (session.players.length > 0) {
+        document.getElementById(`config-RED`).value = `PLAYER_${session.players[0].id}`;
+        document.getElementById(`config-BLUE`).value = 'CPU';
+        document.getElementById(`config-YELLOW`).value = 'CPU';
+        document.getElementById(`config-GREEN`).value = 'CPU';
+    }
+}
+
+function copyRoomLink() {
+    const urlInput = document.getElementById('lobby-url');
+    urlInput.select();
+    document.execCommand('copy');
+    showToast('Room link copied to clipboard!');
+}
+
+function showToast(message, icon = 'fa-check') {
+    const toast = document.createElement('div');
+    toast.className = `fixed top-6 right-6 bg-slate-800/95 backdrop-blur-sm border border-slate-600 text-white px-5 py-3 rounded-2xl shadow-2xl z-[200] flex items-center gap-3 transform transition-all duration-400 translate-x-[150%] font-medium`;
+    toast.innerHTML = `<div class="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center"><i class="fa-solid ${icon} text-emerald-400 text-sm"></i></div> <span>${message}</span>`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.remove('translate-x-[150%]'));
+    setTimeout(() => {
+        toast.classList.add('translate-x-[150%]');
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
+
+/**
+ * SAVE & RESUME & PAUSE LOGIC
+ */
+function saveGame() {
+    SupabaseDB.saveGameState(gameState);
+    showToast('Game progress saved!', 'fa-cloud-arrow-up');
+}
+
+async function resumeGame() {
+    let saved = await SupabaseDB.loadGameState();
+    if (!saved) return;
+    
+    gameState = saved;
+    isPaused = false;
+    
+    document.getElementById('startup-screen').classList.add('hidden');
+    const mainUI = document.getElementById('main-game-ui');
+    mainUI.classList.remove('hidden');
+    mainUI.style.display = 'flex'; // Explicitly set flex layout
+    
+    // Auto-fullscreen on resume
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().then(() => {
+            if(screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(()=>{});
+        }).catch(()=>{});
+    }
+    
+    document.querySelectorAll('.pawn').forEach(e => e.remove());
+    renderBoardUI();
+    createPawnElements(); 
+    updateDeckUI();
+    
+    document.getElementById('game-log').innerHTML = '';
+    log('Game resumed from save point!');
+    startTurn();
+}
+
+function togglePause(show) {
+    const modal = document.getElementById('pause-modal');
+    const content = document.getElementById('pause-content');
+    if (show) {
+        isPaused = true;
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+    } else {
+        isPaused = false;
+        modal.classList.add('opacity-0');
+        content.classList.add('scale-95');
+        setTimeout(() => { modal.classList.add('hidden'); modal.style.display = 'none'; }, 300);
+    }
+}
+
+function toggleInstructions(show) {
+    const modal = document.getElementById('instructions-modal');
+    const content = document.getElementById('instructions-content');
+    if (show) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+    } else {
+        modal.classList.add('opacity-0');
+        content.classList.add('scale-95');
+        setTimeout(() => { modal.classList.add('hidden'); modal.style.display = 'none'; }, 300);
+    }
+}
+
+function quitGame() {
+    SupabaseDB.saveGameState(gameState);
+    togglePause(false);
+    gameState.status = 'setup'; 
+    
+    if (document.fullscreenElement) document.exitFullscreen();
+    
+    const mainUI = document.getElementById('main-game-ui');
+    mainUI.classList.add('hidden');
+    mainUI.style.display = 'none'; // Clear inline style
+    
+    document.getElementById('startup-screen').classList.remove('hidden');
+    document.getElementById('resume-container').classList.remove('hidden');
+    
+    document.querySelectorAll('.pawn').forEach(e => e.remove());
+}
+
+function clearSaveAndReload() {
+    SupabaseDB.clearSave();
+    location.reload();
+}
+
+/**
+ * GAME INITIALIZATION
+ */
+function startGame() {
+    gameState.players = [];
+    COLORS.forEach(color => {
+        let select = document.getElementById(`config-${color}`);
+        let typeVal = select.value;
+        if (typeVal !== 'NONE') {
+            let isHuman = typeVal.startsWith('PLAYER_') || typeVal === 'HUMAN';
+            let pName = isHuman ? select.options[select.selectedIndex].text : 'CPU AI';
+            
+            gameState.players.push({
+                color: color,
+                type: isHuman ? 'HUMAN' : 'CPU',
+                name: pName,
+                pawns: [0, 1, 2, 3].map(id => ({ id, type: 'START', pos: 0 }))
+            });
+        }
+    });
+
+    if (gameState.players.length < 1) return showToast("Need at least 1 player!", "fa-triangle-exclamation");
+
+    document.getElementById('startup-screen').classList.add('hidden');
+    
+    const mainUI = document.getElementById('main-game-ui');
+    mainUI.classList.remove('hidden');
+    mainUI.style.display = 'flex'; // Ensure Flex layout triggers!
+    
+    // Auto-fullscreen on start
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().then(() => {
+            if(screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(()=>{});
+        }).catch(()=>{});
+    }
+    
+    document.querySelectorAll('.pawn').forEach(e => e.remove());
+    document.getElementById('game-log').innerHTML = '';
+
+    renderBoardUI();
+    createPawnElements();
+    shuffleDeck();
+    
+    gameState.status = 'playing';
+    gameState.turn = 0;
+    isPaused = false;
+    SupabaseDB.saveGameState(gameState);
+    
+    // Trigger ResizeObserver one more time manually to ensure perfection as DOM becomes visible
+    window.dispatchEvent(new Event('resize'));
+
+    startTurn();
+}
+
+/**
+ * 2.5D BOARD RENDERING
+ */
+function getGridCoords(type, index, color) {
+    let x = 0, y = 0;
+    const cellSize = 6.25; 
+    
+    if (type === 'BOARD') {
+        if (index <= 15) { x = index; y = 0; }
+        else if (index <= 30) { x = 15; y = index - 15; }
+        else if (index <= 45) { x = 15 - (index - 30); y = 15; }
+        else { x = 0; y = 15 - (index - 45); }
+    } else if (type === 'SAFETY') {
+        if (color === 'RED') { x = 2; y = index + 1; }
+        else if (color === 'BLUE') { x = 14 - index; y = 2; }
+        else if (color === 'YELLOW') { x = 13; y = 14 - index; }
+        else if (color === 'GREEN') { x = index + 1; y = 13; }
+    } else if (type === 'START') {
+        x = COLOR_CODES[color].start.x; y = COLOR_CODES[color].start.y;
+        return { left: (x * cellSize) + '%', top: (y * cellSize) + '%', w: cellSize*2.2 + '%', h: cellSize*2.2 + '%' };
+    } else if (type === 'HOME') {
+        x = COLOR_CODES[color].home.x; y = COLOR_CODES[color].home.y;
+        return { left: (x * cellSize) + '%', top: (y * cellSize) + '%', w: cellSize*2 + '%', h: cellSize*2 + '%' };
+    }
+    return { left: (x * cellSize) + '%', top: (y * cellSize) + '%', w: cellSize + '%', h: cellSize + '%' };
+}
+
+function renderBoardUI() {
+    const board = document.getElementById('board-container');
+    // Clear dynamic elements but keep structural overlay
+    board.querySelectorAll('.board-cell').forEach(e => e.remove());
+    board.querySelectorAll('.slide-marker-group').forEach(e => e.remove());
+    
+    for(let i = 0; i < 60; i++) {
+        let coords = getGridCoords('BOARD', i);
+        let cell = document.createElement('div');
+        cell.id = `cell-BOARD-${i}`;
+        cell.className = 'board-cell border border-[#d4b996]/40 bg-white flex justify-center items-center shadow-[inset_0_0_10px_rgba(0,0,0,0.03)] rounded-sm';
+        Object.assign(cell.style, { left: coords.left, top: coords.top, width: coords.w, height: coords.h });
+        
+        COLORS.forEach(c => {
+            if(COLOR_CODES[c].entry === i) cell.innerHTML = `<div class="w-4 h-4 rounded-full ${COLOR_CODES[c].bg} opacity-60 shadow-inner" style="transform: translateZ(1px)"></div>`;
+        });
+
+        if (POWERUPS.SPRINGS.includes(i)) {
+            cell.classList.add('!bg-blue-50');
+            cell.innerHTML = `<i class="fa-solid fa-bolt text-blue-400 text-[36px] powerup-icon drop-shadow-md"></i>`;
+        } else if (POWERUPS.MUDS.includes(i)) {
+            cell.classList.add('!bg-[#e7e5e4]');
+            cell.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-400 text-[32px] powerup-icon drop-shadow-md"></i>`;
+        } else if (POWERUPS.PORTALS.includes(i)) {
+            cell.classList.add('!bg-purple-50');
+            cell.innerHTML = `<i class="fa-solid fa-hurricane text-purple-500 text-[40px] portal-icon drop-shadow-lg"></i>`;
+        } else if (POWERUPS.TRAPDOORS.includes(i)) {
+            cell.classList.add('!bg-stone-400');
+            cell.innerHTML = `<i class="fa-solid fa-skull text-stone-700 text-[32px] drop-shadow-sm" style="transform: translateZ(1px)"></i>`;
+        }
+
+        board.appendChild(cell);
+    }
+
+    COLORS.forEach(color => {
+        for(let i=0; i<5; i++) {
+            let coords = getGridCoords('SAFETY', i, color);
+            let cell = document.createElement('div');
+            cell.id = `cell-SAFETY-${color}-${i}`;
+            cell.className = `board-cell border border-white/40 flex justify-center items-center ${COLOR_CODES[color].bg} opacity-90 shadow-inner rounded-sm`;
+            Object.assign(cell.style, { left: coords.left, top: coords.top, width: coords.w, height: coords.h });
+            board.appendChild(cell);
+        }
+        
+        let startCoords = getGridCoords('START', 0, color);
+        let startBox = document.createElement('div');
+        startBox.id = `cell-START-${color}`;
+        startBox.className = `board-cell rounded-full shadow-[inset_0_5px_15px_rgba(0,0,0,0.4),0_2px_5px_rgba(0,0,0,0.1)] flex justify-center items-center p-2 border-4 border-white/30 ${COLOR_CODES[color].bg}`;
+        Object.assign(startBox.style, { left: startCoords.left, top: startCoords.top, width: startCoords.w, height: startCoords.h });
+        startBox.innerHTML = `<span class="absolute text-white/50 font-display font-bold text-[48px] uppercase tracking-widest pointer-events-none drop-shadow-sm" style="transform: translateZ(1px)">Start</span>`;
+        board.appendChild(startBox);
+
+        let homeCoords = getGridCoords('HOME', 0, color);
+        let homeBox = document.createElement('div');
+        homeBox.id = `cell-HOME-${color}`;
+        homeBox.className = `board-cell rounded-full shadow-[inset_0_5px_15px_rgba(0,0,0,0.2)] flex justify-center items-center p-1 bg-white border-4 ${COLOR_CODES[color].border}`;
+        Object.assign(homeBox.style, { left: homeCoords.left, top: homeCoords.top, width: homeCoords.w, height: homeCoords.h });
+        homeBox.innerHTML = `<span class="absolute text-slate-300 font-display font-bold text-[36px] uppercase tracking-widest pointer-events-none drop-shadow-sm" style="transform: translateZ(1px)">Home</span>`;
+        board.appendChild(homeBox);
+    });
+
+    drawSlides();
+}
+
+function drawSlides() {
+    const layer = document.getElementById('slides-layer');
+    layer.innerHTML = '';
+    
+    SLIDES.forEach(slide => {
+        let startCoords = getGridCoords('BOARD', slide.start);
+        let endCoords = getGridCoords('BOARD', slide.end);
+        
+        let group = document.createElement('div');
+        group.className = 'slide-marker-group';
+        
+        let marker = document.createElement('div');
+        marker.className = `absolute ${COLOR_CODES[slide.color].bg} opacity-70 z-0 shadow-sm`;
+        Object.assign(marker.style, { left: startCoords.left, top: startCoords.top, width: startCoords.w, height: startCoords.h, borderRadius: '50%', transform: 'translateZ(2px)' });
+        group.appendChild(marker);
+        
+        let bar = document.createElement('div');
+        bar.className = `absolute ${COLOR_CODES[slide.color].bg} opacity-50 z-0`;
+        if (startCoords.top === endCoords.top) { 
+            let left = Math.min(parseFloat(startCoords.left), parseFloat(endCoords.left));
+            let right = Math.max(parseFloat(startCoords.left), parseFloat(endCoords.left));
+            Object.assign(bar.style, { top: startCoords.top, height: startCoords.h, left: left + '%', width: (right - left + 6.25) + '%', transform: 'translateZ(1px)', borderRadius: '10px' });
+        } else { 
+            let top = Math.min(parseFloat(startCoords.top), parseFloat(endCoords.top));
+            let bottom = Math.max(parseFloat(startCoords.top), parseFloat(endCoords.top));
+            Object.assign(bar.style, { left: startCoords.left, width: startCoords.w, top: top + '%', height: (bottom - top + 6.25) + '%', transform: 'translateZ(1px)', borderRadius: '10px' });
+        }
+        group.appendChild(bar);
+        layer.appendChild(group);
+    });
+}
+
+function createPawnElements() {
+    const board = document.getElementById('board-container');
+    gameState.players.forEach(player => {
+        player.pawns.forEach(pawn => {
+            let el = document.createElement('div');
+            el.id = `pawn-${player.color}-${pawn.id}`;
+            el.className = `pawn cursor-pointer transform-style-3d`; 
+            el.innerHTML = `<i class="fa-solid fa-chess-pawn" style="color: ${COLOR_CODES[player.color].hex};"></i>`;
+            el.dataset.color = player.color;
+            el.dataset.id = pawn.id;
+            el.addEventListener('click', onPawnClick);
+            board.appendChild(el); 
+        });
+    });
+    updatePawnPositions();
+}
+
+function updatePawnPositions() {
+    let cellGroups = {};
+
+    gameState.players.forEach(player => {
+        player.pawns.forEach(pawn => {
+            let el = document.getElementById(`pawn-${player.color}-${pawn.id}`);
+            if(!el) return;
+            
+            let coordsId = `${pawn.type}-${player.color}-${pawn.pos}`;
+            if(!cellGroups[coordsId]) cellGroups[coordsId] = [];
+            cellGroups[coordsId].push({ el, pawn, color: player.color });
+            
+            el.classList.remove('pawn-highlight', 'target-highlight');
+        });
+    });
+
+    Object.keys(cellGroups).forEach(id => {
+        let group = cellGroups[id];
+        let firstPawn = group[0].pawn;
+        let color = group[0].color;
+        
+        let coords = getGridCoords(firstPawn.type, firstPawn.pos, color);
+        let baseLeft = parseFloat(coords.left);
+        let baseTop = parseFloat(coords.top);
+        let baseW = parseFloat(coords.w);
+        let baseH = parseFloat(coords.h);
+        
+        // Algebraically aligns pawn's bottom pivot directly in true center of the floor cell
+        let centerX = baseLeft + (baseW / 2) - (6.25 / 2);
+        let centerY = baseTop + (baseH / 2) - 6.25; 
+
+        group.forEach((item, index) => {
+            let el = item.el;
+            el.style.left = centerX + '%';
+            el.style.top = centerY + '%';
+            
+            if (firstPawn.type === 'START' || firstPawn.type === 'HOME') {
+                const offsets = [
+                    {ml: '-1.5%', mt: '-1.5%'}, {ml: '1.5%', mt: '-1.5%'},
+                    {ml: '-1.5%', mt: '1.5%'},  {ml: '1.5%', mt: '1.5%'}
+                ];
+                el.style.marginLeft = offsets[index] ? offsets[index].ml : '0';
+                el.style.marginTop = offsets[index] ? offsets[index].mt : '0';
+            } else {
+                const offsets = [
+                    {ml: '0', mt: '0'}, {ml: '1%', mt: '1%'},
+                    {ml: '-1%', mt: '-1%'}, {ml: '1%', mt: '-1%'}
+                ];
+                el.style.marginLeft = offsets[index] ? offsets[index].ml : '0';
+                el.style.marginTop = offsets[index] ? offsets[index].mt : '0';
+            }
+        });
+    });
+}
+
+/**
+ * GAME ENGINE & TURN LOGIC
+ */
+function shuffleDeck() {
+    gameState.deck = [...DECK_TEMPLATE];
+    for (let i = gameState.deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [gameState.deck[i], gameState.deck[j]] = [gameState.deck[j], gameState.deck[i]];
+    }
+    gameState.discard = [];
+    updateDeckUI();
+}
+
+function updateDeckUI() {
+    document.getElementById('deck-count').innerText = gameState.deck.length;
+    let ac = document.getElementById('active-card');
+    let deck = document.getElementById('deck');
+    
+    if (gameState.currentCard) {
+        ac.classList.remove('opacity-0', 'scale-95');
+        document.getElementById('card-val').innerText = gameState.currentCard === 13 ? '!' : gameState.currentCard;
+        
+        let colorClass = 'text-slate-800';
+        if (gameState.currentCard === 13) colorClass = 'text-rose-600';
+        if (gameState.currentCard === 9) colorClass = 'text-red-600';
+        if (gameState.currentCard === 6) colorClass = 'text-orange-500';
+        if (gameState.currentCard === 14) colorClass = 'text-emerald-500';
+
+        document.getElementById('card-val').className = `font-display text-3xl md:text-5xl font-bold mb-0.5 pointer-events-none ${colorClass}`;
+        document.getElementById('card-desc').innerText = CARD_DESCRIPTIONS[gameState.currentCard];
+        
+        deck.style.transform = 'scale(0.95)';
+        setTimeout(() => deck.style.transform = '', 150);
+    } else {
+        ac.classList.add('opacity-0', 'scale-95');
+    }
+}
+
+function log(msg) {
+    const logBox = document.getElementById('game-log');
+    let div = document.createElement('div');
+    div.className = "border-b border-slate-700/30 pb-2 mb-1";
+    div.innerHTML = msg; 
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+}
+
+function setActionPrompt(msg) {
+    document.getElementById('action-prompt').innerText = msg;
+}
+
+function startTurn() {
+    if (gameState.status !== 'playing' || isPaused) {
+        if(isPaused && gameState.status === 'playing') setTimeout(startTurn, 500); 
+        return;
+    }
+    
+    gameState.status = 'playing';
+    let activePlayer = gameState.players[gameState.turn];
+    let banner = document.getElementById('turn-banner');
+    banner.className = `py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis ${COLOR_CODES[activePlayer.color].bg}`;
+    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color}</span>`;
+    
+    gameState.currentCard = null;
+    gameState.selectedPawnForSorry = null;
+    updateDeckUI();
+    setActionPrompt("");
+    updatePawnPositions();
+
+    if (activePlayer.type === 'CPU') {
+        document.getElementById('deck').classList.add('cursor-not-allowed', 'opacity-60');
+        document.getElementById('deck').classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
+        setTimeout(cpuTurn, 200); 
+    } else {
+        document.getElementById('deck').classList.remove('cursor-not-allowed', 'opacity-60');
+        document.getElementById('deck').classList.add('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
+        setActionPrompt("Click the deck to draw a card.");
+    }
+}
+
+function handleDeckClick() {
+    let activePlayer = gameState.players[gameState.turn];
+    if (activePlayer.type !== 'HUMAN' || gameState.currentCard !== null || isPaused) return;
+    drawCard();
+    processDrawnCard();
+}
+
+function drawCard() {
+    if (gameState.deck.length === 0) shuffleDeck();
+    gameState.currentCard = gameState.deck.pop();
+    gameState.discard.push(gameState.currentCard);
+    updateDeckUI();
+    
+    let cardName = gameState.currentCard;
+    if (cardName === 13) cardName = '<span class="text-rose-400 font-display">APOLOGIES!</span>';
+    if (cardName === 6) cardName = '<span class="text-orange-400 font-display">EARTHQUAKE</span>';
+    if (cardName === 9) cardName = '<span class="text-red-500 font-display">BULLDOZER</span>';
+    if (cardName === 14) cardName = '<span class="text-emerald-400 font-display">SAFETY DASH</span>';
+
+    log(`<span class="font-bold ${COLOR_CODES[gameState.players[gameState.turn].color].text}">${gameState.players[gameState.turn].name}</span> drew a ${cardName}`);
+}
+
+function processDrawnCard() {
+    let activePlayer = gameState.players[gameState.turn];
+    let moves = calculateValidMoves(activePlayer, gameState.currentCard);
+
+    gameState.status = 'resolving_card';
+
+    // Show popup modal for human players instead of silently skipping/highlighting
+    showCardModal(gameState.currentCard, moves, activePlayer);
+}
+
+function showCardModal(cardVal, moves, activePlayer) {
+    const modal = document.getElementById('card-modal');
+    const content = document.getElementById('card-modal-content');
+    const valEl = document.getElementById('modal-card-val');
+    const descEl = document.getElementById('modal-card-desc');
+    const btnEl = document.getElementById('modal-card-btn');
+
+    let colorClass = 'text-slate-800';
+    let displayVal = cardVal;
+    if (cardVal === 13) { colorClass = 'text-rose-600'; displayVal = '!'; }
+    if (cardVal === 9) colorClass = 'text-red-600';
+    if (cardVal === 6) colorClass = 'text-orange-500';
+    if (cardVal === 14) colorClass = 'text-emerald-500';
+
+    valEl.className = `font-display text-[100px] md:text-[120px] font-bold leading-none mb-2 drop-shadow-md z-10 ${colorClass}`;
+    valEl.innerText = displayVal;
+    descEl.innerText = CARD_DESCRIPTIONS[cardVal];
+
+    // Condense identical moves from START into a single logical choice
+    let logicalMoves = [];
+    let startMoveAdded = false;
+
+    moves.forEach(m => {
+        let pawn = activePlayer.pawns[m.pawnIndex];
+        if (pawn.type === 'START') {
+            if (!startMoveAdded) {
+                startMoveAdded = true;
+                logicalMoves.push(m);
+            }
+        } else {
+            logicalMoves.push(m);
+        }
+    });
+
+    let uniquePawnsWithMoves = [...new Set(logicalMoves.map(m => m.pawnIndex))];
+
+    if (logicalMoves.length === 0) {
+        btnEl.className = "mt-8 px-8 py-4 w-full bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(225,29,72,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
+        btnEl.innerText = "No Moves - End Turn";
+        btnEl.onclick = () => {
+            hideCardModal();
+            setActionPrompt("No valid moves available.");
+            gameState.status = 'turn_ending'; 
+            setTimeout(() => endTurn(gameState.currentCard === 2), 200);
+        };
+    } else if (uniquePawnsWithMoves.length === 1) {
+        // SMART ROUTER: Only ONE pawn can legally move! Bypass board clicking entirely!
+        let thePawnIndex = uniquePawnsWithMoves[0];
+        let movesForThisPawn = logicalMoves.filter(m => m.pawnIndex === thePawnIndex);
+        
+        btnEl.className = "mt-8 px-8 py-4 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(37,99,235,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
+
+        if (movesForThisPawn.length === 1) {
+            let singleMove = movesForThisPawn[0];
+            if (singleMove.isSorry) {
+                // Find all valid targets
+                let validTargets = [];
+                gameState.players.forEach(opp => {
+                    if (opp.color !== activePlayer.color) {
+                        opp.pawns.forEach(op => {
+                            if (op.type === 'BOARD') validTargets.push({ color: opp.color, id: op.id, pos: op.pos });
+                        });
+                    }
+                });
+
+                if (validTargets.length === 1) {
+                    btnEl.innerText = "Auto-Bump Opponent";
+                    btnEl.onclick = () => {
+                        hideCardModal();
+                        executeSorryMove(singleMove.pawnIndex, validTargets[0].color, validTargets[0].id, validTargets[0].pos);
+                    };
+                } else {
+                    btnEl.innerText = "Select Target to Bump";
+                    btnEl.onclick = () => {
+                        hideCardModal();
+                        gameState.selectedPawnForSorry = singleMove.pawnIndex;
+                        gameState.status = 'waiting_sorry_target';
+                        setActionPrompt("Click an opponent's pawn to bump.");
+                        updatePawnPositions(); 
+                        validTargets.forEach(t => document.getElementById(`pawn-${t.color}-${t.id}`).classList.add('target-highlight'));
+                    };
+                }
+            } else {
+                btnEl.innerText = "Auto-Move";
+                btnEl.onclick = () => {
+                    hideCardModal();
+                    setActionPrompt("Auto-moving...");
+                    executeMove(activePlayer, singleMove);
+                };
+            }
+        } else {
+            // 1 Pawn, MULTIPLE path options (e.g., Card 10!)
+            btnEl.innerText = "Choose Move Options";
+            btnEl.onclick = () => {
+                hideCardModal();
+                showChoiceModal(activePlayer, movesForThisPawn);
+            };
+        }
+    } else {
+        // MULTIPLE PAWNS CAN MOVE
+        btnEl.className = "mt-8 px-8 py-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
+        btnEl.innerText = "Make Move";
+        btnEl.onclick = () => {
+            hideCardModal();
+            gameState.status = 'waiting_pawn_selection';
+            setActionPrompt("Select a glowing pawn to move.");
+            logicalMoves.forEach(m => {
+                document.getElementById(`pawn-${activePlayer.color}-${m.pawnIndex}`).classList.add('pawn-highlight');
+            });
+        };
+    }
+
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        content.classList.remove('scale-95');
+    }, 10);
+}
+
+function hideCardModal() {
+    const modal = document.getElementById('card-modal');
+    const content = document.getElementById('card-modal-content');
+    modal.style.pointerEvents = 'none'; // Prevent invisible ghost clicks during animation
+    modal.classList.add('opacity-0');
+    content.classList.add('scale-95');
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'auto'; // Reset
+    }, 300);
+}
+
+function showChoiceModal(player, validMoves) {
+    gameState.status = 'waiting_move_choice';
+    const modal = document.getElementById('choice-modal');
+    const content = document.getElementById('choice-content');
+    const container = document.getElementById('choice-buttons');
+    container.innerHTML = '';
+
+    validMoves.forEach((m) => {
+        let btn = document.createElement('button');
+        btn.className = "w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-0.5 flex flex-col items-center gap-1";
+        
+        let desc = m.fwd > 0 ? `Move Forward ${m.fwd}` : `Move Backward ${m.bck}`;
+        let subDesc = "";
+        
+        if (m.targetType === 'HOME') subDesc = `🏆 Arrive at Home!`;
+        else if (m.isTrapdoor) subDesc = `💀 Fall in Trapdoor!`;
+        else if (m.isMud) subDesc = `⚠️ Stuck in Mud`;
+        else if (m.isSpring) subDesc = `⚡ Hit a Springboard!`;
+        else if (m.isPortal) subDesc = `🌀 Warp via Portal!`;
+        else if (m.isSlide) subDesc = `🛝 Take the Slide!`;
+        else if (m.bumped && m.bumped.length > 0) subDesc = `💥 Bump Opponent!`;
+
+        btn.innerHTML = `<span>${desc}</span>${subDesc ? `<span class="text-xs text-emerald-100 font-medium opacity-90">${subDesc}</span>` : ''}`;
+        
+        btn.onclick = () => {
+            hideChoiceModal();
+            executeMove(player, m);
+        };
+        container.appendChild(btn);
+    });
+
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        content.classList.remove('scale-95');
+    }, 10);
+}
+
+function hideChoiceModal() {
+    const modal = document.getElementById('choice-modal');
+    const content = document.getElementById('choice-content');
+    modal.style.pointerEvents = 'none'; // Prevent invisible ghost clicks during animation
+    modal.classList.add('opacity-0');
+    content.classList.add('scale-95');
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'auto'; // Reset
+    }, 300);
+}
+
+function cancelChoice() {
+    hideChoiceModal();
+    gameState.status = 'waiting_pawn_selection';
+    setActionPrompt("Select a glowing pawn to move.");
+}
+
+/**
+ * PATHFINDING LOGIC
+ */
+function calculateValidMoves(player, cardVal) {
+    let validMoves = [];
+    
+    player.pawns.forEach((pawn, idx) => {
+        if (pawn.type === 'HOME') return;
+
+        if (cardVal === 13) {
+            if (pawn.type === 'START') {
+                let hasTargets = false;
+                gameState.players.forEach(opp => {
+                    if (opp.color !== player.color) {
+                        opp.pawns.forEach(op => { if (op.type === 'BOARD') hasTargets = true; });
+                    }
+                });
+                if (hasTargets) validMoves.push({ pawnIndex: idx, isSorry: true });
+            }
+            return; 
+        }
+
+        if (cardVal === 14) {
+            if (pawn.type === 'START') {
+                let exitIdx = COLOR_CODES[player.color].exit;
+                let moveData = createMoveData(player, pawn, idx, 'BOARD', exitIdx);
+                moveData.isSafetyDash = true;
+                validMoves.push(moveData);
+            }
+            return;
+        }
+
+        if (pawn.type === 'START') {
+            if (cardVal === 1 || cardVal === 2) {
+                let entryIdx = COLOR_CODES[player.color].entry;
+                if (!hasOwnPawnAt(player, 'BOARD', entryIdx)) {
+                    validMoves.push(createMoveData(player, pawn, idx, 'BOARD', entryIdx));
+                }
+            }
+            return;
+        }
+
+        let forwardSteps = cardVal;
+        let backwardSteps = 0;
+        
+        if (cardVal === 4) { forwardSteps = 0; backwardSteps = 4; }
+        if (cardVal === 10) evaluatePath(player, pawn, idx, 0, 1, validMoves, cardVal); 
+        
+        if (forwardSteps > 0) evaluatePath(player, pawn, idx, forwardSteps, 0, validMoves, cardVal);
+        if (backwardSteps > 0) evaluatePath(player, pawn, idx, 0, backwardSteps, validMoves, cardVal);
+    });
+
+    return validMoves;
+}
+
+function evaluatePath(player, pawn, pawnIdx, fwd, bck, movesArray, cardVal) {
+    let simType = pawn.type;
+    let simPos = pawn.pos;
+    let stepsLeft = fwd > 0 ? fwd : bck;
+    let isFwd = fwd > 0;
+    let exitIdx = COLOR_CODES[player.color].exit;
+    let intermediateBumps = [];
+
+    while (stepsLeft > 0) {
+        if (simType === 'BOARD') {
+            if (isFwd) {
+                if (simPos === exitIdx) { simType = 'SAFETY'; simPos = 0; }
+                else { simPos = (simPos + 1) % 60; }
+            } else {
+                simPos = (simPos - 1 + 60) % 60;
+            }
+        } else if (simType === 'SAFETY') {
+            if (isFwd) {
+                simPos++;
+                if (simPos === 5) { simType = 'HOME'; simPos = 0; }
+                else if (simPos > 5) return; 
+            } else {
+                simPos--;
+                if (simPos < 0) { simType = 'BOARD'; simPos = exitIdx; }
+            }
+        }
+        stepsLeft--;
+
+        if (isFwd && simType === 'BOARD' && cardVal === 9) {
+            gameState.players.forEach(opp => {
+                if (opp.color !== player.color) {
+                    opp.pawns.forEach((op, opIdx) => {
+                        if (op.type === 'BOARD' && op.pos === simPos) {
+                            intermediateBumps.push({ playerColor: opp.color, pawnIdx: opIdx });
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    if (simType === 'HOME') {
+        let md = createMoveData(player, pawn, pawnIdx, simType, simPos);
+        md.fwd = fwd; md.bck = bck;
+        movesArray.push(md);
+        return;
+    }
+
+    if (!hasOwnPawnAt(player, simType, simPos)) {
+        let md = createMoveData(player, pawn, pawnIdx, simType, simPos);
+        md.fwd = fwd; md.bck = bck;
+        
+        if (cardVal === 6) md.isEarthquake = true;
+        
+        if (cardVal === 9) {
+            md.isBulldozer = true;
+            let finalBumpIndices = md.bumped.map(b => `${b.playerColor}-${b.pawnIdx}`);
+            intermediateBumps.forEach(ib => {
+                if (!finalBumpIndices.includes(`${ib.playerColor}-${ib.pawnIdx}`)) {
+                    md.bumped.push(ib);
+                }
+            });
+        }
+        movesArray.push(md);
+    }
+}
+
+function hasOwnPawnAt(player, type, pos) {
+    return player.pawns.some(p => p.type === type && p.pos === pos);
+}
+
+function createMoveData(player, pawn, pawnIdx, targetType, targetPos) {
+    let finalType = targetType;
+    let finalPos = targetPos;
+    let bumped = [];
+    let isSlide = false;
+    let isSpring = false;
+    let isMud = false;
+    let isPortal = false;
+    let isTrapdoor = false;
+
+    if (finalType === 'BOARD') {
+        let slide = SLIDES.find(s => s.start === finalPos);
+        if (slide && slide.color !== player.color) {
+            isSlide = true;
+            finalPos = slide.end;
+            
+            let pathIndexes = [];
+            let curr = slide.start;
+            while (curr !== slide.end) {
+                pathIndexes.push(curr);
+                curr = (curr + 1) % 60;
+            }
+            pathIndexes.push(slide.end);
+            
+            gameState.players.forEach(opp => {
+                opp.pawns.forEach((op, opIdx) => {
+                    if (op.type === 'BOARD' && pathIndexes.includes(op.pos) && !(opp.color === player.color && opIdx === pawnIdx)) {
+                        bumped.push({ playerColor: opp.color, pawnIdx: opIdx });
+                    }
+                });
+            });
+        }
+
+        if (POWERUPS.SPRINGS.includes(finalPos)) {
+            isSpring = true;
+            finalPos = (finalPos + 4) % 60;
+        } else if (POWERUPS.MUDS.includes(finalPos)) {
+            isMud = true;
+            finalPos = (finalPos - 4 + 60) % 60;
+        } else if (POWERUPS.PORTALS.includes(finalPos)) {
+            isPortal = true;
+            finalPos = finalPos === 8 ? 38 : 8; 
+        } else if (POWERUPS.TRAPDOORS.includes(finalPos)) {
+            isTrapdoor = true;
+            finalType = 'START';
+            finalPos = 0;
+        }
+
+        if (finalType === 'BOARD' && (!isSlide || isSpring || isMud || isPortal)) { 
+            gameState.players.forEach(opp => {
+                if (opp.color !== player.color) {
+                    opp.pawns.forEach((op, opIdx) => {
+                        if (op.type === 'BOARD' && op.pos === finalPos) {
+                            bumped.push({ playerColor: opp.color, pawnIdx: opIdx });
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    return { 
+        pawnIndex: pawnIdx, targetType: finalType, targetPos: finalPos, 
+        bumped: bumped, isSlide, isSpring, isMud, isPortal, isTrapdoor 
+    };
+}
+
+/**
+ * INTERACTION & EXECUTION
+ */
+function onPawnClick(e) {
+    // Aggressive lockout to prevent multi-clicking from breaking the engine state loop
+    if (gameState.status === 'gameover' || gameState.status === 'turn_ending' || isPaused) return;
+    
+    let activePlayer = gameState.players[gameState.turn];
+    if (activePlayer.type !== 'HUMAN') return;
+
+    let clickedColor = e.currentTarget.dataset.color;
+    let clickedId = parseInt(e.currentTarget.dataset.id);
+
+    if (gameState.status === 'waiting_sorry_target') {
+        if (clickedColor !== activePlayer.color) {
+            let targetPawn = gameState.players.find(p => p.color === clickedColor).pawns[clickedId];
+            if (targetPawn.type === 'BOARD') {
+                executeSorryMove(gameState.selectedPawnForSorry, clickedColor, clickedId, targetPawn.pos);
+            }
+        }
+        return;
+    }
+    
+    if (gameState.status === 'waiting_move_choice') return;
+    if (!gameState.currentCard) return;
+    if (!['playing', 'waiting_pawn_selection', 'waiting_sorry_target', 'resolving_card'].includes(gameState.status)) return;
+
+    if (clickedColor !== activePlayer.color) return;
+
+    let moves = calculateValidMoves(activePlayer, gameState.currentCard);
+    let myMoves = moves.filter(m => m.pawnIndex === clickedId);
+
+    if (myMoves.length === 0) return;
+
+    if (myMoves[0].isSorry) {
+        gameState.selectedPawnForSorry = clickedId;
+        gameState.status = 'waiting_sorry_target';
+        setActionPrompt("Click an opponent's pawn to bump.");
+        
+        updatePawnPositions(); 
+        gameState.players.forEach(opp => {
+            if (opp.color !== activePlayer.color) {
+                opp.pawns.forEach(op => {
+                    if (op.type === 'BOARD') document.getElementById(`pawn-${opp.color}-${op.id}`).classList.add('target-highlight');
+                });
+            }
+        });
+        return;
+    }
+
+    // Branching Move Choice Router
+    if (myMoves.length > 1) {
+        showChoiceModal(activePlayer, myMoves);
+    } else {
+        executeMove(activePlayer, myMoves[0]);
+    }
+}
+
+function executeSorryMove(myStartIdx, oppColor, oppIdx, targetBoardPos) {
+    let activePlayer = gameState.players[gameState.turn];
+    let oppPlayer = gameState.players.find(p => p.color === oppColor);
+    
+    oppPlayer.pawns[oppIdx].type = 'START';
+    oppPlayer.pawns[oppIdx].pos = 0;
+    log(`<span class="text-rose-400 font-bold font-display">APOLOGIES!</span> ${activePlayer.color} bumped ${oppColor}`);
+
+    activePlayer.pawns[myStartIdx].type = 'BOARD';
+    activePlayer.pawns[myStartIdx].pos = targetBoardPos;
+    
+    finalizeMoveAndTurn();
+}
+
+function executeMove(player, moveData) {
+    let pawn = player.pawns[moveData.pawnIndex];
+    
+    pawn.type = moveData.targetType;
+    pawn.pos = moveData.targetPos;
+
+    if (moveData.isSafetyDash) log(`<i class="fa-solid fa-jet-fighter text-emerald-400"></i> SAFETY DASH! Warped to Safety!`);
+    
+    if (moveData.isEarthquake) {
+        log(`<i class="fa-solid fa-house-crack text-orange-400"></i> EARTHQUAKE! Opponents knocked back!`);
+        gameState.players.forEach(opp => {
+            if (opp.color !== player.color) {
+                opp.pawns.forEach(op => {
+                    if (op.type === 'BOARD') op.pos = (op.pos - 1 + 60) % 60;
+                });
+            }
+        });
+    }
+
+    if (moveData.isBulldozer) log(`<i class="fa-solid fa-truck-monster text-red-500"></i> BULLDOZER! Cleared the path!`);
+
+    if (moveData.isSlide) log(`${player.color} took a slide!`);
+    if (moveData.isSpring) log(`<i class="fa-solid fa-bolt text-blue-400"></i> ${player.color} hit a SPRINGBOARD! (+4)`);
+    if (moveData.isMud) log(`<i class="fa-solid fa-triangle-exclamation text-red-400"></i> ${player.color} fell in MUD! (-4)`);
+    if (moveData.isPortal) log(`<i class="fa-solid fa-hurricane text-purple-400"></i> ${player.color} warped through a PORTAL!`);
+    if (moveData.isTrapdoor) log(`<i class="fa-solid fa-skull text-stone-400"></i> OH NO! ${player.color} fell in a TRAPDOOR!`);
+
+    if (moveData.bumped && moveData.bumped.length > 0) {
+        moveData.bumped.forEach(b => {
+            let bPlayer = gameState.players.find(p => p.color === b.playerColor);
+            bPlayer.pawns[b.pawnIdx].type = 'START';
+            bPlayer.pawns[b.pawnIdx].pos = 0;
+            log(`${player.color} bumped ${b.playerColor}!`);
+        });
+    }
+
+    finalizeMoveAndTurn();
+}
+
+function finalizeMoveAndTurn() {
+    updatePawnPositions();
+    SupabaseDB.saveGameState(gameState);
+    
+    // Engine Lockout prevents clicking while turn transition is pending
+    gameState.status = 'turn_ending'; 
+    
+    if (checkWinCondition()) return;
+
+    let isCPU = gameState.players[gameState.turn].type === 'CPU';
+    let delay = isCPU ? 200 : 1000;
+
+    let drawAgain = (gameState.currentCard === 2);
+    if (drawAgain) log(`${gameState.players[gameState.turn].name} draws again!`);
+
+    setTimeout(() => endTurn(drawAgain), delay);
+}
+
+function checkWinCondition() {
+    let activePlayer = gameState.players[gameState.turn];
+    let homeCount = activePlayer.pawns.filter(p => p.type === 'HOME').length;
+    if (homeCount === 4) {
+        gameState.status = 'gameover';
+        SupabaseDB.clearSave(); 
+        document.getElementById('win-screen').classList.remove('hidden');
+        document.getElementById('win-screen').classList.add('flex');
+        document.getElementById('win-message').innerText = `${activePlayer.name} WINS!`;
+        return true;
+    }
+    return false;
+}
+
+function endTurn(drawAgain) {
+    if (gameState.status === 'gameover') return;
+    if (isPaused) {
+        setTimeout(() => endTurn(drawAgain), 500); 
+        return;
+    }
+    if (!drawAgain) gameState.turn = (gameState.turn + 1) % gameState.players.length;
+    
+    gameState.status = 'playing'; // Re-open game state locks 
+    startTurn();
+}
+
+/**
+ * CPU AI 
+ */
+function cpuTurn() {
+    if (gameState.status !== 'playing') return;
+    if(isPaused) {
+        setTimeout(cpuTurn, 500);
+        return;
+    }
+    
+    drawCard();
+    
+    setTimeout(() => {
+        let activePlayer = gameState.players[gameState.turn];
+        let moves = calculateValidMoves(activePlayer, gameState.currentCard);
+
+        if (moves.length === 0) {
+            log(`${activePlayer.name} has no valid moves.`);
+            gameState.status = 'turn_ending';
+            setTimeout(() => endTurn(gameState.currentCard === 2), 200); 
+            return;
+        }
+
+        let sorryMoves = moves.filter(m => m.isSorry);
+        if (sorryMoves.length > 0) {
+            let myStartIdx = sorryMoves[0].pawnIndex;
+            let bestTarget = null;
+            let highestVal = -1;
+
+            gameState.players.forEach(opp => {
+                if (opp.color !== activePlayer.color) {
+                    opp.pawns.forEach((op, opIdx) => {
+                        if (op.type === 'BOARD' && op.pos > highestVal) {
+                            highestVal = op.pos;
+                            bestTarget = { col: opp.color, idx: opIdx, pos: op.pos };
+                        }
+                    });
+                }
+            });
+            if (bestTarget) return executeSorryMove(myStartIdx, bestTarget.col, bestTarget.idx, bestTarget.pos);
+        }
+
+        let bestMove = null;
+        let bestScore = -9999;
+
+        moves.forEach(m => {
+            let score = 0;
+            if (m.targetType === 'HOME') score += 5000;
+            if (m.bumped && m.bumped.length > 0) score += 500 * m.bumped.length;
+            if (activePlayer.pawns[m.pawnIndex].type === 'START') score += 200;
+            if (m.targetType === 'SAFETY' && activePlayer.pawns[m.pawnIndex].type !== 'SAFETY') score += 100;
+            
+            if (m.isSafetyDash) score += 900; 
+            if (m.isEarthquake) score += 200; 
+            if (m.isBulldozer) score += 100; 
+            
+            if (m.isSlide) score += 50;
+            if (m.isSpring) score += 80;
+            if (m.isMud) score -= 100;
+            if (m.isTrapdoor) score -= 5000; 
+
+            if (m.targetType === 'BOARD') {
+                let dist = (COLOR_CODES[activePlayer.color].exit - m.targetPos + 60) % 60;
+                score -= dist; 
+                if (m.isPortal) {
+                   let prePortalTarget = m.targetPos === 8 ? 38 : 8; 
+                   let preDist = (COLOR_CODES[activePlayer.color].exit - prePortalTarget + 60) % 60;
+                   score += (preDist - dist) * 10; 
+                }
+            }
+            score += Math.random() * 5; 
+            if (score > bestScore) { bestScore = score; bestMove = m; }
+        });
+
+        executeMove(activePlayer, bestMove);
+    }, 400);
+}
+</script>
+</body>
+</html>
