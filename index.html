@@ -874,15 +874,15 @@ async function upsertMyProfile() {
 
 async function createOnlineRoom() {
     for (let attempt = 0; attempt < 5; attempt++) {
+        const roomId = crypto.randomUUID();
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const { data, error } = await SupabaseDB.client
+        const { error } = await SupabaseDB.client
             .schema('Apologies')
             .from('rooms')
-            .insert({ room_code: roomCode, host_user_id: session.userId, status: 'waiting' })
-            .select('id,room_code')
-            .single();
+            .insert({ id: roomId, room_code: roomCode, host_user_id: session.userId, status: 'waiting' });
 
-        if (!error && data) return data;
+        if (!error) return { id: roomId, room_code: roomCode };
+        // error likely means duplicate room_code — retry with a new code
     }
 
     throw new Error('Failed to create unique room code.');
