@@ -1165,8 +1165,8 @@ async function setupOnlineLobby() {
         subscribeLobbyRealtime();
         updateVoiceButtonUI();
     } catch (err) {
-        console.warn(err);
-        showToast('Unable to set up online lobby.', 'fa-triangle-exclamation');
+        console.error('setupOnlineLobby error:', err);
+        showToast(`Unable to set up online lobby: ${err?.message || err}`, 'fa-triangle-exclamation');
     }
 }
 
@@ -1187,7 +1187,7 @@ function buildPlayerConfigUI() {
     COLORS.forEach((color) => {
         let optionsHTML = '';
         
-        if (session.playMode === 'local') {
+        if (session.playMode === 'local' || session.players.length === 0) {
              optionsHTML += `<option value="HUMAN">You</option>`;
         } else {
              session.players.forEach(p => {
@@ -1211,7 +1211,7 @@ function buildPlayerConfigUI() {
     });
 
     // 1 HUMAN VS 3 CPU DEFAULT SETUP FOR LOCAL PLAY 
-    if (session.playMode === 'local') {
+    if (session.playMode === 'local' || session.players.length === 0) {
         document.getElementById(`config-RED`).value = 'HUMAN';
         document.getElementById(`config-BLUE`).value = 'CPU';
         document.getElementById(`config-YELLOW`).value = 'CPU';
