@@ -380,7 +380,7 @@
     <div id="main-game-ui" class="hidden flex-row h-[100dvh] w-full overflow-hidden bg-slate-950">
         
         <!-- Game Board Area -->
-        <div id="board-area" class="flex-1 h-full flex justify-center items-center overflow-hidden min-w-0 min-h-0">
+        <div id="board-area" class="flex-1 h-full flex justify-center items-center overflow-hidden min-w-0 min-h-0 relative z-50">
             
             <!-- Scaler precisely scales the unscaled 3D box to fit 10px within the flex container bounds -->
             <div id="board-scaler" class="transform-style-3d">
@@ -404,14 +404,17 @@
         </div>
 
         <!-- UI / Controls Sidebar (Locked fixed width on the right side) -->
-        <div class="w-[240px] md:w-[320px] lg:w-[360px] shrink-0 glass-panel flex flex-col border-l border-slate-700/50 shadow-[-10px_0_30px_rgba(0,0,0,0.6)] z-40 relative h-full">
+        <div class="w-[240px] md:w-[320px] lg:w-[360px] shrink-0 glass-panel flex flex-col border-l border-slate-700/50 shadow-[-10px_0_30px_rgba(0,0,0,0.6)] z-40 relative h-full pointer-events-none">
             
-            <div class="relative bg-slate-900/50 border-b border-slate-700/50">
+            <div class="relative bg-slate-900/50 border-b border-slate-700/50 pointer-events-auto">
                 <div id="turn-banner" class="py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis">
                     Preparing Board...
                 </div>
                 <!-- Action Buttons -->
                 <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1.5 md:gap-2">
+                    <button onclick="toggleVoiceChat()" id="voice-btn" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Voice Chat (Multiplayer)">
+                        <i class="fa-solid fa-microphone-slash text-xs md:text-sm"></i>
+                    </button>
                     <button onclick="toggleFullScreen()" id="fullscreen-btn" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Toggle Fullscreen">
                         <i class="fa-solid fa-expand text-xs md:text-sm"></i>
                     </button>
@@ -424,7 +427,7 @@
                 </div>
             </div>
 
-            <div class="flex-1 flex flex-col p-3 md:p-5 overflow-hidden gap-3 md:gap-5">
+            <div class="flex-1 flex flex-col p-3 md:p-5 overflow-hidden gap-3 md:gap-5 pointer-events-auto">
                 
                 <!-- Deck Area -->
                 <div class="flex justify-around items-center bg-slate-900/40 p-3 md:p-5 rounded-2xl border border-slate-700/50 shrink-0 shadow-inner">
@@ -629,14 +632,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('room')) {
-        session.roomId = urlParams.get('room');
+        session.roomId = String(urlParams.get('room') || '').toUpperCase();
         session.isHost = false;
         document.getElementById('mode-local').classList.add('hidden');
         document.getElementById('mode-online').innerHTML = "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
         selectPlayMode('online');
     }
     
-    SupabaseDB.init();
+    await SupabaseDB.init();
+    session.userId = SupabaseDB.userId;
+    updateVoiceButtonUI();
     
     let saved = await SupabaseDB.loadGameState();
     if (saved && saved.status === 'playing') {
@@ -712,10 +717,77 @@ const SLIDES = [
  * STATE MANAGEMENT
  */
 let gameState = {
-    status: 'setup', players: [], turn: 0, deck: [], discard: [], currentCard: null, selectedPawnForSorry: null
+    status: 'setup', players: [], turn: 0, deck: [], discard: [], currentCard: null, selectedPawnForSorry: null, pendingMoves: []
 };
-let session = { nickname: '', roomId: null, isHost: false, playMode: 'local', players: [] };
+let session = {
+    nickname: '',
+    roomId: null,
+    roomDbId: null,
+    onlineGameId: null,
+    userId: null,
+    isHost: false,
+    playMode: 'local',
+    players: []
+};
+
+let onlineSync = {
+    lobbyChannel: null,
+    gameChannel: null,
+    applyingRemote: false,
+    lastStateHash: ''
+};
+
+let voiceChat = {
+    enabled: false,
+    channel: null,
+    localStream: null,
+    peers: {},
+    audioEls: {}
+};
+
 let isPaused = false;
+
+function stateHash(stateObj) {
+    try {
+        return JSON.stringify(stateObj);
+    } catch {
+        return '';
+    }
+}
+
+function isOnlineGame() {
+    return session.playMode === 'online' && !!session.roomDbId && !!session.onlineGameId;
+}
+
+function isControlledByThisDevice(player) {
+    if (session.playMode !== 'online') return true;
+    if (player.type === 'CPU') return session.isHost;
+    if (!player.controllerUserId) return false;
+    return player.controllerUserId === session.userId;
+}
+
+function updateVoiceButtonUI() {
+    const btn = document.getElementById('voice-btn');
+    if (!btn) return;
+    const icon = btn.querySelector('i');
+    const online = session.playMode === 'online' && !!session.roomDbId;
+
+    if (!online) {
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.classList.remove('bg-emerald-700', 'border-emerald-500', 'text-emerald-200');
+        icon.className = 'fa-solid fa-microphone-slash text-xs md:text-sm';
+        return;
+    }
+
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    if (voiceChat.enabled) {
+        btn.classList.add('bg-emerald-700', 'border-emerald-500', 'text-emerald-200');
+        icon.className = 'fa-solid fa-microphone text-xs md:text-sm';
+    } else {
+        btn.classList.remove('bg-emerald-700', 'border-emerald-500', 'text-emerald-200');
+        icon.className = 'fa-solid fa-microphone-slash text-xs md:text-sm';
+    }
+}
 
 /**
  * FULL SCREEN MODE
@@ -769,16 +841,18 @@ function selectPlayMode(mode) {
         
         buildPlayerConfigUI();
     }
+
+    updateVoiceButtonUI();
 }
 
-function handleLetsGo() {
+async function handleLetsGo() {
     if (session.playMode === 'online') {
         const nameInput = document.getElementById('player-nickname').value.trim();
         if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
         
         session.nickname = nameInput;
         document.getElementById('auth-section').classList.add('hidden');
-        setupOnlineLobby();
+        await setupOnlineLobby();
     } else {
         // "JUST ME" FLOW: Skip lobby, skip nickname, start instantly!
         session.nickname = 'You';
@@ -786,45 +860,313 @@ function handleLetsGo() {
     }
 }
 
-function setupOnlineLobby() {
-    document.getElementById('lobby-section').classList.remove('hidden');
-    document.getElementById('lobby-section').classList.add('flex');
-    
-    if (session.isHost === false && session.roomId) {
-        document.getElementById('host-badge').classList.add('hidden');
-        document.getElementById('lobby-title-text').innerText = `Joining Room: ${session.roomId}`;
-        document.getElementById('qr-container').classList.add('hidden');
-        document.getElementById('link-container').classList.add('hidden');
-        document.getElementById('btn-start-online').innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
-        document.getElementById('btn-start-online').classList.replace('bg-emerald-600', 'bg-slate-600');
-        document.getElementById('btn-start-online').classList.replace('hover:bg-emerald-500', 'cursor-not-allowed');
-        document.getElementById('btn-start-online').onclick = null;
-        
-        session.players = [{ id: 'p1', name: session.nickname, isHost: false }];
-        renderLobbyPlayers();
-        buildPlayerConfigUI();
-        showToast("Connected to Room!");
+async function upsertMyProfile() {
+    if (!SupabaseDB.client || !session.userId) return;
+    await SupabaseDB.client
+        .schema('Apologies')
+        .from('profiles')
+        .upsert({
+            user_id: session.userId,
+            nickname: session.nickname,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+}
+
+async function createOnlineRoom() {
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const { data, error } = await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .insert({ room_code: roomCode, host_user_id: session.userId, status: 'waiting' })
+            .select('id,room_code')
+            .single();
+
+        if (!error && data) return data;
+    }
+
+    throw new Error('Failed to create unique room code.');
+}
+
+async function refreshLobbyPlayersFromDB() {
+    if (!SupabaseDB.client || !session.roomDbId) return;
+
+    const { data: roomPlayers, error: roomErr } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('room_players')
+        .select('user_id,is_host,joined_at,left_at')
+        .eq('room_id', session.roomDbId)
+        .is('left_at', null)
+        .order('joined_at', { ascending: true });
+
+    if (roomErr) throw roomErr;
+
+    const ids = (roomPlayers || []).map(p => p.user_id);
+    let profileMap = {};
+
+    if (ids.length) {
+        const { data: profiles } = await SupabaseDB.client
+            .schema('Apologies')
+            .from('profiles')
+            .select('user_id,nickname')
+            .in('user_id', ids);
+
+        (profiles || []).forEach(p => { profileMap[p.user_id] = p.nickname; });
+    }
+
+    session.players = (roomPlayers || []).map(p => ({
+        id: p.user_id,
+        name: profileMap[p.user_id] || `Player ${String(p.user_id).slice(0, 6)}`,
+        isHost: !!p.is_host
+    }));
+
+    renderLobbyPlayers();
+    buildPlayerConfigUI();
+    if (voiceChat.enabled) connectVoiceToCurrentPlayers();
+}
+
+function subscribeLobbyRealtime() {
+    if (!SupabaseDB.client || !session.roomDbId) return;
+
+    if (onlineSync.lobbyChannel) SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+
+    onlineSync.lobbyChannel = SupabaseDB.client
+        .channel(`apologies-lobby-${session.roomDbId}`)
+        .on('postgres_changes', {
+            event: '*',
+            schema: 'Apologies',
+            table: 'room_players',
+            filter: `room_id=eq.${session.roomDbId}`
+        }, async () => {
+            await refreshLobbyPlayersFromDB();
+        })
+        .on('postgres_changes', {
+            event: '*',
+            schema: 'Apologies',
+            table: 'games',
+            filter: `room_id=eq.${session.roomDbId}`
+        }, async () => {
+            await checkForActiveOnlineGame();
+        })
+        .subscribe();
+}
+
+async function checkForActiveOnlineGame() {
+    if (!SupabaseDB.client || !session.roomDbId || session.onlineGameId) return;
+
+    const { data, error } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('games')
+        .select('id,state,status')
+        .eq('room_id', session.roomDbId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error || !data || !data.state) return;
+
+    session.onlineGameId = data.id;
+    beginOnlineGameFromState(data.state);
+    subscribeToGameRealtime();
+    showToast('Joined active multiplayer game.', 'fa-link');
+}
+
+function subscribeToGameRealtime() {
+    if (!SupabaseDB.client || !session.onlineGameId) return;
+
+    if (onlineSync.gameChannel) SupabaseDB.client.removeChannel(onlineSync.gameChannel);
+
+    onlineSync.gameChannel = SupabaseDB.client
+        .channel(`apologies-game-${session.onlineGameId}`)
+        .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'Apologies',
+            table: 'games',
+            filter: `id=eq.${session.onlineGameId}`
+        }, (payload) => {
+            if (!payload.new || !payload.new.state) return;
+            const incoming = payload.new.state;
+            const incomingHash = stateHash(incoming);
+            if (!incomingHash || incomingHash === onlineSync.lastStateHash) return;
+
+            onlineSync.applyingRemote = true;
+            gameState = incoming;
+            onlineSync.lastStateHash = incomingHash;
+            renderGameFromSyncedState();
+            onlineSync.applyingRemote = false;
+        })
+        .subscribe();
+}
+
+async function pushOnlineGameState(reason = '') {
+    if (!isOnlineGame() || onlineSync.applyingRemote || !SupabaseDB.client) return;
+
+    const hashed = stateHash(gameState);
+    if (!hashed || hashed === onlineSync.lastStateHash) return;
+    onlineSync.lastStateHash = hashed;
+
+    const activeColor = gameState.players[gameState.turn] ? gameState.players[gameState.turn].color : null;
+
+    const { error } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('games')
+        .update({
+            state: gameState,
+            turn_index: gameState.turn,
+            current_card: gameState.currentCard,
+            active_color: activeColor,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', session.onlineGameId);
+
+    if (error) console.warn('pushOnlineGameState failed:', reason, error.message);
+}
+
+function beginOnlineGameFromState(state) {
+    gameState = state;
+    isPaused = false;
+
+    document.getElementById('startup-screen').classList.add('hidden');
+    const mainUI = document.getElementById('main-game-ui');
+    mainUI.classList.remove('hidden');
+    mainUI.style.display = 'flex';
+
+    document.querySelectorAll('.pawn').forEach(e => e.remove());
+    document.getElementById('game-log').innerHTML = '';
+    renderBoardUI();
+    createPawnElements();
+    updateDeckUI();
+    applyActiveTurnUI();
+    updateVoiceButtonUI();
+}
+
+function renderGameFromSyncedState() {
+    const mainUI = document.getElementById('main-game-ui');
+    if (mainUI.classList.contains('hidden')) {
+        beginOnlineGameFromState(gameState);
+        return;
+    }
+
+    updateDeckUI();
+    updatePawnPositions();
+    applyActiveTurnUI();
+}
+
+function applyActiveTurnUI() {
+    if (!gameState.players || gameState.players.length === 0) return;
+    const activePlayer = gameState.players[gameState.turn];
+    if (!activePlayer) return;
+
+    let banner = document.getElementById('turn-banner');
+    banner.className = `py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis ${COLOR_CODES[activePlayer.color].bg}`;
+    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color}</span>`;
+
+    const deck = document.getElementById('deck');
+    const canControl = isControlledByThisDevice(activePlayer);
+
+    if (gameState.currentCard !== null || !canControl) {
+        deck.classList.add('cursor-not-allowed', 'opacity-60');
+        deck.classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
     } else {
-        session.roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        deck.classList.remove('cursor-not-allowed', 'opacity-60');
+        deck.classList.add('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
+    }
+
+    if (!canControl) {
+        setActionPrompt(`Waiting for ${activePlayer.name}...`);
+    } else if (gameState.currentCard === null) {
+        setActionPrompt('Click the deck to draw a card.');
+    }
+}
+
+async function setupOnlineLobby() {
+    try {
+        await SupabaseDB.init();
+        session.userId = SupabaseDB.userId;
+
+        if (!SupabaseDB.client || !session.userId) {
+            showToast('Multiplayer requires Supabase connection.', 'fa-triangle-exclamation');
+            return;
+        }
+
+        await upsertMyProfile();
+
+        document.getElementById('lobby-section').classList.remove('hidden');
+        document.getElementById('lobby-section').classList.add('flex');
+
+        if (session.isHost === false && session.roomId) {
+            document.getElementById('host-badge').classList.add('hidden');
+            document.getElementById('lobby-title-text').innerText = `Joining Room: ${session.roomId}`;
+            document.getElementById('qr-container').classList.add('hidden');
+            document.getElementById('link-container').classList.add('hidden');
+            document.getElementById('btn-start-online').innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
+            document.getElementById('btn-start-online').classList.replace('bg-emerald-600', 'bg-slate-600');
+            document.getElementById('btn-start-online').classList.replace('hover:bg-emerald-500', 'cursor-not-allowed');
+            document.getElementById('btn-start-online').onclick = null;
+
+            const { data: room, error: roomErr } = await SupabaseDB.client
+                .schema('Apologies')
+                .from('rooms')
+                .select('id, room_code, host_user_id')
+                .eq('room_code', session.roomId)
+                .maybeSingle();
+
+            if (roomErr || !room) {
+                showToast('Room not found. Check the invite link.', 'fa-triangle-exclamation');
+                return;
+            }
+
+            session.roomDbId = room.id;
+            session.isHost = room.host_user_id === session.userId;
+
+            await SupabaseDB.client
+                .schema('Apologies')
+                .from('room_players')
+                .upsert({
+                    room_id: session.roomDbId,
+                    user_id: session.userId,
+                    is_host: session.isHost,
+                    joined_at: new Date().toISOString(),
+                    left_at: null
+                }, { onConflict: 'room_id,user_id' });
+
+            await refreshLobbyPlayersFromDB();
+            subscribeLobbyRealtime();
+            await checkForActiveOnlineGame();
+            updateVoiceButtonUI();
+            showToast('Connected to Room!');
+            return;
+        }
+
+        const room = await createOnlineRoom();
+        session.roomDbId = room.id;
+        session.roomId = room.room_code;
         session.isHost = true;
+
         const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + session.roomId;
-        window.history.pushState({path:newUrl},'',newUrl);
-        
+        window.history.pushState({ path: newUrl }, '', newUrl);
+
         document.getElementById('lobby-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(newUrl)}`;
         document.getElementById('lobby-url').value = newUrl;
-        
-        session.players = [{ id: 'host', name: session.nickname, isHost: true }];
-        renderLobbyPlayers();
-        buildPlayerConfigUI();
-        
-        setTimeout(() => {
-            if(gameState.status === 'setup' && session.isHost) {
-                session.players.push({ id: 'friend1', name: 'Friend Bob', isHost: false });
-                renderLobbyPlayers();
-                buildPlayerConfigUI(); 
-                showToast("Friend Bob joined the room!", "fa-user-plus");
-            }
-        }, 3000);
+
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('room_players')
+            .upsert({
+                room_id: session.roomDbId,
+                user_id: session.userId,
+                is_host: true,
+                joined_at: new Date().toISOString(),
+                left_at: null
+            }, { onConflict: 'room_id,user_id' });
+
+        await refreshLobbyPlayersFromDB();
+        subscribeLobbyRealtime();
+        updateVoiceButtonUI();
+    } catch (err) {
+        console.warn(err);
+        showToast('Unable to set up online lobby.', 'fa-triangle-exclamation');
     }
 }
 
@@ -875,7 +1217,8 @@ function buildPlayerConfigUI() {
         document.getElementById(`config-YELLOW`).value = 'CPU';
         document.getElementById(`config-GREEN`).value = 'CPU';
     } else if (session.players.length > 0) {
-        document.getElementById(`config-RED`).value = `PLAYER_${session.players[0].id}`;
+        const me = session.players.find(p => p.id === session.userId) || session.players[0];
+        document.getElementById(`config-RED`).value = `PLAYER_${me.id}`;
         document.getElementById(`config-BLUE`).value = 'CPU';
         document.getElementById(`config-YELLOW`).value = 'CPU';
         document.getElementById(`config-GREEN`).value = 'CPU';
@@ -901,11 +1244,202 @@ function showToast(message, icon = 'fa-check') {
     }, 3000);
 }
 
+function getIceConfig() {
+    return {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+    };
+}
+
+async function ensureVoiceChannel() {
+    if (!SupabaseDB.client || !session.roomDbId) return null;
+    if (voiceChat.channel) return voiceChat.channel;
+
+    voiceChat.channel = SupabaseDB.client
+        .channel(`apologies-voice-${session.roomDbId}`)
+        .on('broadcast', { event: 'webrtc-signal' }, async ({ payload }) => {
+            if (!payload || !payload.to || payload.to !== session.userId) return;
+            await handleVoiceSignal(payload);
+        });
+
+    voiceChat.channel.subscribe();
+    return voiceChat.channel;
+}
+
+function cleanupVoicePeer(userId) {
+    if (voiceChat.peers[userId]) {
+        try { voiceChat.peers[userId].close(); } catch {}
+        delete voiceChat.peers[userId];
+    }
+    if (voiceChat.audioEls[userId]) {
+        voiceChat.audioEls[userId].remove();
+        delete voiceChat.audioEls[userId];
+    }
+}
+
+function getOrCreateVoicePeer(remoteUserId) {
+    if (voiceChat.peers[remoteUserId]) return voiceChat.peers[remoteUserId];
+
+    const pc = new RTCPeerConnection(getIceConfig());
+    voiceChat.peers[remoteUserId] = pc;
+
+    if (voiceChat.localStream) {
+        voiceChat.localStream.getTracks().forEach(track => {
+            pc.addTrack(track, voiceChat.localStream);
+        });
+    }
+
+    pc.onicecandidate = async (event) => {
+        if (!event.candidate || !voiceChat.channel) return;
+        await voiceChat.channel.send({
+            type: 'broadcast',
+            event: 'webrtc-signal',
+            payload: {
+                from: session.userId,
+                to: remoteUserId,
+                candidate: event.candidate
+            }
+        });
+    };
+
+    pc.ontrack = (event) => {
+        let audio = voiceChat.audioEls[remoteUserId];
+        if (!audio) {
+            audio = document.createElement('audio');
+            audio.autoplay = true;
+            audio.playsInline = true;
+            audio.dataset.peer = remoteUserId;
+            document.body.appendChild(audio);
+            voiceChat.audioEls[remoteUserId] = audio;
+        }
+        audio.srcObject = event.streams[0];
+    };
+
+    pc.onconnectionstatechange = () => {
+        const st = pc.connectionState;
+        if (st === 'failed' || st === 'closed' || st === 'disconnected') {
+            cleanupVoicePeer(remoteUserId);
+        }
+    };
+
+    return pc;
+}
+
+async function sendVoiceOffer(remoteUserId) {
+    const pc = getOrCreateVoicePeer(remoteUserId);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await voiceChat.channel.send({
+        type: 'broadcast',
+        event: 'webrtc-signal',
+        payload: {
+            from: session.userId,
+            to: remoteUserId,
+            description: pc.localDescription
+        }
+    });
+}
+
+async function connectVoiceToCurrentPlayers() {
+    if (!voiceChat.enabled || !voiceChat.channel) return;
+    const remoteUsers = session.players.map(p => p.id).filter(id => id !== session.userId);
+    for (const remoteUserId of remoteUsers) {
+        if (!voiceChat.peers[remoteUserId] && session.userId < remoteUserId) {
+            await sendVoiceOffer(remoteUserId);
+        }
+    }
+}
+
+async function handleVoiceSignal(payload) {
+    const from = payload.from;
+    if (!from || from === session.userId) return;
+
+    const pc = getOrCreateVoicePeer(from);
+
+    if (payload.description) {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.description));
+        if (payload.description.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await voiceChat.channel.send({
+                type: 'broadcast',
+                event: 'webrtc-signal',
+                payload: {
+                    from: session.userId,
+                    to: from,
+                    description: pc.localDescription
+                }
+            });
+        }
+    } else if (payload.candidate) {
+        try {
+            await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        } catch (err) {
+            console.warn('ICE add failed', err);
+        }
+    }
+}
+
+async function toggleVoiceChat() {
+    if (session.playMode !== 'online' || !session.roomDbId) {
+        showToast('Voice is available in online games only.', 'fa-microphone-slash');
+        return;
+    }
+
+    if (voiceChat.enabled) {
+        stopVoiceChat();
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        voiceChat.localStream = stream;
+        await ensureVoiceChannel();
+        voiceChat.enabled = true;
+        updateVoiceButtonUI();
+        showToast('Voice chat enabled.', 'fa-microphone');
+
+        const remoteUsers = session.players
+            .map(p => p.id)
+            .filter(id => id !== session.userId);
+
+        for (const remoteUserId of remoteUsers) {
+            if (session.userId < remoteUserId) {
+                await sendVoiceOffer(remoteUserId);
+            }
+        }
+    } catch (err) {
+        console.warn(err);
+        showToast('Microphone permission denied or unavailable.', 'fa-triangle-exclamation');
+    }
+}
+
+function stopVoiceChat() {
+    Object.keys(voiceChat.peers).forEach(cleanupVoicePeer);
+
+    if (voiceChat.localStream) {
+        voiceChat.localStream.getTracks().forEach(track => track.stop());
+        voiceChat.localStream = null;
+    }
+
+    if (voiceChat.channel && SupabaseDB.client) {
+        SupabaseDB.client.removeChannel(voiceChat.channel);
+    }
+
+    voiceChat.channel = null;
+    voiceChat.enabled = false;
+    updateVoiceButtonUI();
+    showToast('Voice chat disabled.', 'fa-microphone-slash');
+}
+
 /**
  * SAVE & RESUME & PAUSE LOGIC
  */
 function saveGame() {
     SupabaseDB.saveGameState(gameState);
+    pushOnlineGameState('saveGame');
     showToast('Game progress saved!', 'fa-cloud-arrow-up');
 }
 
@@ -968,8 +1502,23 @@ function toggleInstructions(show) {
     }
 }
 
-function quitGame() {
+async function quitGame() {
     SupabaseDB.saveGameState(gameState);
+    if (voiceChat.enabled) stopVoiceChat();
+
+    if (session.playMode === 'online' && SupabaseDB.client && session.roomDbId && session.userId) {
+        try {
+            await SupabaseDB.client
+                .schema('Apologies')
+                .from('room_players')
+                .update({ left_at: new Date().toISOString() })
+                .eq('room_id', session.roomDbId)
+                .eq('user_id', session.userId);
+        } catch (err) {
+            console.warn('Failed to mark room leave:', err);
+        }
+    }
+
     togglePause(false);
     gameState.status = 'setup'; 
     
@@ -983,6 +1532,15 @@ function quitGame() {
     document.getElementById('resume-container').classList.remove('hidden');
     
     document.querySelectorAll('.pawn').forEach(e => e.remove());
+
+    if (onlineSync.lobbyChannel && SupabaseDB.client) SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+    if (onlineSync.gameChannel && SupabaseDB.client) SupabaseDB.client.removeChannel(onlineSync.gameChannel);
+    onlineSync.lobbyChannel = null;
+    onlineSync.gameChannel = null;
+    session.roomDbId = null;
+    session.onlineGameId = null;
+    session.players = [];
+    updateVoiceButtonUI();
 }
 
 function clearSaveAndReload() {
@@ -993,7 +1551,7 @@ function clearSaveAndReload() {
 /**
  * GAME INITIALIZATION
  */
-function startGame() {
+async function startGame() {
     gameState.players = [];
     COLORS.forEach(color => {
         let select = document.getElementById(`config-${color}`);
@@ -1001,17 +1559,23 @@ function startGame() {
         if (typeVal !== 'NONE') {
             let isHuman = typeVal.startsWith('PLAYER_') || typeVal === 'HUMAN';
             let pName = isHuman ? select.options[select.selectedIndex].text : 'CPU AI';
+            let controllerUserId = null;
+            if (session.playMode === 'online' && typeVal.startsWith('PLAYER_')) {
+                controllerUserId = typeVal.replace('PLAYER_', '');
+            }
             
             gameState.players.push({
                 color: color,
                 type: isHuman ? 'HUMAN' : 'CPU',
                 name: pName,
+                controllerUserId,
                 pawns: [0, 1, 2, 3].map(id => ({ id, type: 'START', pos: 0 }))
             });
         }
     });
 
     if (gameState.players.length < 1) return showToast("Need at least 1 player!", "fa-triangle-exclamation");
+    if (session.playMode === 'online' && !session.isHost) return;
 
     document.getElementById('startup-screen').classList.add('hidden');
     
@@ -1037,6 +1601,40 @@ function startGame() {
     gameState.turn = 0;
     isPaused = false;
     SupabaseDB.saveGameState(gameState);
+
+    if (session.playMode === 'online' && SupabaseDB.client && session.roomDbId) {
+        try {
+            const { data: gameRow, error: gameErr } = await SupabaseDB.client
+                .schema('Apologies')
+                .from('games')
+                .insert({
+                    room_id: session.roomDbId,
+                    host_user_id: session.userId,
+                    status: 'active',
+                    turn_index: gameState.turn,
+                    active_color: gameState.players[gameState.turn] ? gameState.players[gameState.turn].color : null,
+                    current_card: gameState.currentCard,
+                    state: gameState
+                })
+                .select('id')
+                .single();
+
+            if (gameErr) throw gameErr;
+            session.onlineGameId = gameRow.id;
+
+            await SupabaseDB.client
+                .schema('Apologies')
+                .from('rooms')
+                .update({ status: 'active', started_at: new Date().toISOString() })
+                .eq('id', session.roomDbId);
+
+            subscribeToGameRealtime();
+            await pushOnlineGameState('startGame');
+        } catch (err) {
+            console.warn(err);
+            showToast('Unable to start synchronized multiplayer game.', 'fa-triangle-exclamation');
+        }
+    }
     
     // Trigger ResizeObserver one more time manually to ensure perfection as DOM becomes visible
     window.dispatchEvent(new Event('resize'));
@@ -1304,6 +1902,7 @@ function startTurn() {
     
     gameState.currentCard = null;
     gameState.selectedPawnForSorry = null;
+    gameState.pendingMoves = [];
     updateDeckUI();
     setActionPrompt("");
     updatePawnPositions();
@@ -1311,17 +1910,27 @@ function startTurn() {
     if (activePlayer.type === 'CPU') {
         document.getElementById('deck').classList.add('cursor-not-allowed', 'opacity-60');
         document.getElementById('deck').classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
-        setTimeout(cpuTurn, 200); 
+        if (isControlledByThisDevice(activePlayer)) {
+            setTimeout(cpuTurn, 200);
+        } else {
+            setActionPrompt(`Waiting for ${activePlayer.name}...`);
+        }
     } else {
-        document.getElementById('deck').classList.remove('cursor-not-allowed', 'opacity-60');
-        document.getElementById('deck').classList.add('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
-        setActionPrompt("Click the deck to draw a card.");
+        if (isControlledByThisDevice(activePlayer)) {
+            document.getElementById('deck').classList.remove('cursor-not-allowed', 'opacity-60');
+            document.getElementById('deck').classList.add('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
+            setActionPrompt("Click the deck to draw a card.");
+        } else {
+            document.getElementById('deck').classList.add('cursor-not-allowed', 'opacity-60');
+            document.getElementById('deck').classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
+            setActionPrompt(`Waiting for ${activePlayer.name}...`);
+        }
     }
 }
 
 function handleDeckClick() {
     let activePlayer = gameState.players[gameState.turn];
-    if (activePlayer.type !== 'HUMAN' || gameState.currentCard !== null || isPaused) return;
+    if (activePlayer.type !== 'HUMAN' || gameState.currentCard !== null || isPaused || !isControlledByThisDevice(activePlayer)) return;
     drawCard();
     processDrawnCard();
 }
@@ -1329,6 +1938,7 @@ function handleDeckClick() {
 function drawCard() {
     if (gameState.deck.length === 0) shuffleDeck();
     gameState.currentCard = gameState.deck.pop();
+    gameState.pendingMoves = [];
     gameState.discard.push(gameState.currentCard);
     updateDeckUI();
     
@@ -1339,11 +1949,13 @@ function drawCard() {
     if (cardName === 14) cardName = '<span class="text-emerald-400 font-display">SAFETY DASH</span>';
 
     log(`<span class="font-bold ${COLOR_CODES[gameState.players[gameState.turn].color].text}">${gameState.players[gameState.turn].name}</span> drew a ${cardName}`);
+    pushOnlineGameState('drawCard');
 }
 
 function processDrawnCard() {
     let activePlayer = gameState.players[gameState.turn];
     let moves = calculateValidMoves(activePlayer, gameState.currentCard);
+    gameState.pendingMoves = moves;
 
     gameState.status = 'resolving_card';
 
@@ -1369,25 +1981,10 @@ function showCardModal(cardVal, moves, activePlayer) {
     valEl.innerText = displayVal;
     descEl.innerText = CARD_DESCRIPTIONS[cardVal];
 
-    // Condense identical moves from START into a single logical choice
-    let logicalMoves = [];
-    let startMoveAdded = false;
+    const uniquePawnsWithMoves = [...new Set(moves.map(m => m.pawnIndex))];
 
-    moves.forEach(m => {
-        let pawn = activePlayer.pawns[m.pawnIndex];
-        if (pawn.type === 'START') {
-            if (!startMoveAdded) {
-                startMoveAdded = true;
-                logicalMoves.push(m);
-            }
-        } else {
-            logicalMoves.push(m);
-        }
-    });
-
-    let uniquePawnsWithMoves = [...new Set(logicalMoves.map(m => m.pawnIndex))];
-
-    if (logicalMoves.length === 0) {
+    if (moves.length === 0) {
+        gameState.pendingMoves = [];
         btnEl.className = "mt-8 px-8 py-4 w-full bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(225,29,72,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
         btnEl.innerText = "No Moves - End Turn";
         btnEl.onclick = () => {
@@ -1396,68 +1993,14 @@ function showCardModal(cardVal, moves, activePlayer) {
             gameState.status = 'turn_ending'; 
             setTimeout(() => endTurn(gameState.currentCard === 2), 200);
         };
-    } else if (uniquePawnsWithMoves.length === 1) {
-        // SMART ROUTER: Only ONE pawn can legally move! Bypass board clicking entirely!
-        let thePawnIndex = uniquePawnsWithMoves[0];
-        let movesForThisPawn = logicalMoves.filter(m => m.pawnIndex === thePawnIndex);
-        
-        btnEl.className = "mt-8 px-8 py-4 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(37,99,235,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
-
-        if (movesForThisPawn.length === 1) {
-            let singleMove = movesForThisPawn[0];
-            if (singleMove.isSorry) {
-                // Find all valid targets
-                let validTargets = [];
-                gameState.players.forEach(opp => {
-                    if (opp.color !== activePlayer.color) {
-                        opp.pawns.forEach(op => {
-                            if (op.type === 'BOARD') validTargets.push({ color: opp.color, id: op.id, pos: op.pos });
-                        });
-                    }
-                });
-
-                if (validTargets.length === 1) {
-                    btnEl.innerText = "Auto-Bump Opponent";
-                    btnEl.onclick = () => {
-                        hideCardModal();
-                        executeSorryMove(singleMove.pawnIndex, validTargets[0].color, validTargets[0].id, validTargets[0].pos);
-                    };
-                } else {
-                    btnEl.innerText = "Select Target to Bump";
-                    btnEl.onclick = () => {
-                        hideCardModal();
-                        gameState.selectedPawnForSorry = singleMove.pawnIndex;
-                        gameState.status = 'waiting_sorry_target';
-                        setActionPrompt("Click an opponent's pawn to bump.");
-                        updatePawnPositions(); 
-                        validTargets.forEach(t => document.getElementById(`pawn-${t.color}-${t.id}`).classList.add('target-highlight'));
-                    };
-                }
-            } else {
-                btnEl.innerText = "Auto-Move";
-                btnEl.onclick = () => {
-                    hideCardModal();
-                    setActionPrompt("Auto-moving...");
-                    executeMove(activePlayer, singleMove);
-                };
-            }
-        } else {
-            // 1 Pawn, MULTIPLE path options (e.g., Card 10!)
-            btnEl.innerText = "Choose Move Options";
-            btnEl.onclick = () => {
-                hideCardModal();
-                showChoiceModal(activePlayer, movesForThisPawn);
-            };
-        }
     } else {
-        // MULTIPLE PAWNS CAN MOVE
         btnEl.className = "mt-8 px-8 py-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
-        btnEl.innerText = "Make Move";
+        btnEl.innerText = uniquePawnsWithMoves.length === 1 ? "Select Pawn" : "Make Move";
         btnEl.onclick = () => {
             hideCardModal();
             gameState.status = 'waiting_pawn_selection';
             setActionPrompt("Select a glowing pawn to move.");
-            logicalMoves.forEach(m => {
+            moves.forEach(m => {
                 document.getElementById(`pawn-${activePlayer.color}-${m.pawnIndex}`).classList.add('pawn-highlight');
             });
         };
@@ -1744,6 +2287,7 @@ function onPawnClick(e) {
     
     let activePlayer = gameState.players[gameState.turn];
     if (activePlayer.type !== 'HUMAN') return;
+    if (!isControlledByThisDevice(activePlayer)) return;
 
     let clickedColor = e.currentTarget.dataset.color;
     let clickedId = parseInt(e.currentTarget.dataset.id);
@@ -1764,7 +2308,9 @@ function onPawnClick(e) {
 
     if (clickedColor !== activePlayer.color) return;
 
-    let moves = calculateValidMoves(activePlayer, gameState.currentCard);
+    let moves = (gameState.pendingMoves && gameState.pendingMoves.length > 0)
+        ? gameState.pendingMoves
+        : calculateValidMoves(activePlayer, gameState.currentCard);
     let myMoves = moves.filter(m => m.pawnIndex === clickedId);
 
     if (myMoves.length === 0) return;
@@ -1849,6 +2395,8 @@ function executeMove(player, moveData) {
 function finalizeMoveAndTurn() {
     updatePawnPositions();
     SupabaseDB.saveGameState(gameState);
+    gameState.pendingMoves = [];
+    pushOnlineGameState('finalizeMoveAndTurn');
     
     // Engine Lockout prevents clicking while turn transition is pending
     gameState.status = 'turn_ending'; 
@@ -1887,6 +2435,7 @@ function endTurn(drawAgain) {
     if (!drawAgain) gameState.turn = (gameState.turn + 1) % gameState.players.length;
     
     gameState.status = 'playing'; // Re-open game state locks 
+    pushOnlineGameState('endTurn');
     startTurn();
 }
 
