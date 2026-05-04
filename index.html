@@ -93,34 +93,51 @@
             position: relative;
             width: min(72vmin, 780px);
             height: min(72vmin, 780px);
-            border-radius: 18px;
-            border: 8px solid #3a2f20;
-            background: #f9f6ee;
-            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+            border-radius: 12px;
+            border: 13px solid #2e1705;
+            background-color: #f2e8c8;
+            background-image:
+                radial-gradient(ellipse at 28% 28%, rgba(255,255,255,0.28) 0%, transparent 52%),
+                radial-gradient(ellipse at 72% 72%, rgba(0,0,0,0.06) 0%, transparent 52%);
+            box-shadow:
+                0 0 0 3px #8b5430,
+                0 0 0 6px #2e1705,
+                0 32px 80px rgba(0,0,0,0.7),
+                inset 0 0 60px rgba(0,0,0,0.05);
             overflow: hidden;
         }
 
         .cell {
             position: absolute;
-            border: 1px solid rgba(0, 0, 0, 0.09);
-            border-radius: 6px;
-            background: #fffdf8;
+            border: 1px solid rgba(0,0,0,0.11);
+            border-radius: 5px;
+            box-shadow: inset 0 1px 2px rgba(255,255,255,0.65), inset 0 -1px 2px rgba(0,0,0,0.07);
         }
 
         .pawn {
             position: absolute;
-            width: 34px;
-            height: 34px;
+            width: 30px;
+            height: 30px;
             border-radius: 999px;
-            border: 2px solid rgba(255,255,255,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 16px;
-            box-shadow: 0 6px 12px rgba(0,0,0,0.35);
-            transition: left 200ms ease, top 200ms ease;
+            box-shadow:
+                0 5px 10px rgba(0,0,0,0.5),
+                0 2px 3px rgba(0,0,0,0.3),
+                inset 0 -3px 5px rgba(0,0,0,0.28);
+            transition: left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1);
             z-index: 40;
+            overflow: hidden;
+        }
+
+        .pawn::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 5px;
+            width: 9px;
+            height: 7px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.52);
+            pointer-events: none;
         }
 
         .side-scroll {
@@ -144,8 +161,8 @@
             }
 
             #board {
-                width: min(90vw, 560px);
-                height: min(90vw, 560px);
+                width: min(90vw, 540px);
+                height: min(90vw, 540px);
             }
 
             #hud {
@@ -361,7 +378,7 @@
             ...Array(8).fill(3),
             ...Array(8).fill(4),
             ...Array(8).fill(5),
-            ...Array(4).fill(6),
+            ...Array(8).fill(2),
             ...Array(8).fill(7),
             ...Array(8).fill(8),
             ...Array(4).fill(9),
@@ -1166,62 +1183,123 @@
                 this.trackCoords = [];
                 const board = document.getElementById('board');
                 board.innerHTML = '';
-                const N = 16;
-                const cellPct = 100 / N;
+                const cp = 100 / 16; // cell percent
 
+                // ── Background corner zones ──────────────────────────
+                const ZONES = [
+                    { color: COLOR_DEF.RED.hex,    x: 0, y: 0, w: 6, h: 6 },
+                    { color: COLOR_DEF.BLUE.hex,   x: 10, y: 0, w: 6, h: 6 },
+                    { color: COLOR_DEF.YELLOW.hex, x: 10, y: 10, w: 6, h: 6 },
+                    { color: COLOR_DEF.GREEN.hex,  x: 0, y: 10, w: 6, h: 6 }
+                ];
+                ZONES.forEach(z => {
+                    const bg = document.createElement('div');
+                    bg.style.cssText = `position:absolute;left:${z.x*cp}%;top:${z.y*cp}%;width:${z.w*cp}%;height:${z.h*cp}%;background:${z.color}1e;pointer-events:none;z-index:0;`;
+                    board.appendChild(bg);
+                });
+
+                // ── Center decoration ────────────────────────────────
+                const center = document.createElement('div');
+                center.style.cssText = `position:absolute;left:${3.5*cp}%;top:${3.5*cp}%;width:${9*cp}%;height:${9*cp}%;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none;`;
+                center.innerHTML = `<div style="text-align:center;transform:rotate(-6deg)"><div style="font-family:'Space Grotesk',sans-serif;font-weight:900;color:#6b4a1e;opacity:0.38;line-height:1.15;font-size:clamp(10px,2.2vmin,22px)">APOLOGIES!</div></div>`;
+                board.appendChild(center);
+
+                // ── Track cells ──────────────────────────────────────
                 const path = [];
                 for (let x = 0; x <= 15; x++) path.push({ x, y: 0 });
                 for (let y = 1; y <= 15; y++) path.push({ x: 15, y });
                 for (let x = 14; x >= 0; x--) path.push({ x, y: 15 });
                 for (let y = 14; y >= 1; y--) path.push({ x: 0, y });
 
+                // Slide ranges per color [start, end inclusive] – visual only
+                const SLIDES = { RED: [[1,4],[9,13]], BLUE: [[16,19],[24,28]], YELLOW: [[31,34],[39,43]], GREEN: [[46,49],[54,58]] };
+                function slideColor(i) {
+                    for (const [col, ranges] of Object.entries(SLIDES))
+                        for (const [s,e] of ranges) if (i >= s && i <= e) return col;
+                    return null;
+                }
+                function trackZoneColor(i) {
+                    if (i < 15) return COLOR_DEF.RED.hex;
+                    if (i < 30) return COLOR_DEF.BLUE.hex;
+                    if (i < 45) return COLOR_DEF.YELLOW.hex;
+                    return COLOR_DEF.GREEN.hex;
+                }
+
                 path.forEach((p, i) => {
                     this.trackCoords.push(p);
                     const cell = document.createElement('div');
                     cell.className = 'cell';
-                    cell.style.left = `${p.x * cellPct}%`;
-                    cell.style.top = `${p.y * cellPct}%`;
-                    cell.style.width = `${cellPct}%`;
-                    cell.style.height = `${cellPct}%`;
+                    cell.style.left = `${p.x * cp}%`;
+                    cell.style.top = `${p.y * cp}%`;
+                    cell.style.width = `${cp}%`;
+                    cell.style.height = `${cp}%`;
+                    cell.style.zIndex = '2';
+                    const sc = slideColor(i);
+                    if (sc) {
+                        const h = COLOR_DEF[sc].hex;
+                        cell.style.background = `linear-gradient(135deg, ${h}cc, ${h}88)`;
+                        cell.style.outline = `2px solid ${h}bb`;
+                        cell.style.outlineOffset = '-2px';
+                    } else {
+                        const h = trackZoneColor(i);
+                        cell.style.background = `linear-gradient(145deg, ${h}28, ${h}12)`;
+                    }
                     cell.id = `cell-board-${i}`;
                     board.appendChild(cell);
                 });
 
+                // Entry square accent
                 COLORS.forEach(color => {
+                    const entry = document.getElementById(`cell-board-${COLOR_DEF[color].entry}`);
+                    if (entry) {
+                        entry.style.background = `${COLOR_DEF[color].hex}99`;
+                        entry.style.outline = `2px solid ${COLOR_DEF[color].hex}dd`;
+                        entry.style.outlineOffset = '-2px';
+                    }
+                });
+
+                // ── Safety paths ─────────────────────────────────────
+                COLORS.forEach(color => {
+                    const hex = COLOR_DEF[color].hex;
                     for (let i = 0; i < 5; i++) {
                         const c = getSafetyCoord(color, i);
                         const cell = document.createElement('div');
                         cell.className = 'cell';
-                        cell.style.left = `${c.x * cellPct}%`;
-                        cell.style.top = `${c.y * cellPct}%`;
-                        cell.style.width = `${cellPct}%`;
-                        cell.style.height = `${cellPct}%`;
-                        cell.style.background = `${COLOR_DEF[color].hex}33`;
+                        cell.style.left = `${c.x * cp}%`;
+                        cell.style.top = `${c.y * cp}%`;
+                        cell.style.width = `${cp}%`;
+                        cell.style.height = `${cp}%`;
+                        cell.style.zIndex = '3';
+                        const alpha = Math.round((0.28 + i * 0.13) * 255).toString(16).padStart(2,'0');
+                        cell.style.background = `linear-gradient(135deg, ${hex}${alpha}, ${hex}${Math.round((0.28 + i*0.13)*0.65*255).toString(16).padStart(2,'0')})`;
+                        cell.style.boxShadow = `inset 0 1px 3px rgba(0,0,0,0.18), inset 0 -1px 2px rgba(255,255,255,0.45)`;
                         cell.id = `cell-safety-${color}-${i}`;
                         board.appendChild(cell);
                     }
+                });
 
+                // ── Start circles ────────────────────────────────────
+                COLORS.forEach(color => {
+                    const hex = COLOR_DEF[color].hex;
+                    const [light,,dark] = PAWN_COLORS[color];
                     const s = COLOR_DEF[color].start;
+                    const W = 3.0;
                     const start = document.createElement('div');
-                    start.className = 'cell';
-                    start.style.left = `${s.x * cellPct}%`;
-                    start.style.top = `${s.y * cellPct}%`;
-                    start.style.width = `${cellPct * 2.3}%`;
-                    start.style.height = `${cellPct * 2.3}%`;
-                    start.style.borderRadius = '50%';
-                    start.style.background = `${COLOR_DEF[color].hex}44`;
+                    start.style.cssText = `position:absolute;left:${(s.x-W/2)*cp}%;top:${(s.y-W/2)*cp}%;width:${W*cp}%;height:${W*cp}%;border-radius:50%;background:radial-gradient(circle at 38% 34%, ${light}, ${hex} 56%, ${dark});border:3px solid ${hex}dd;box-shadow:0 4px 14px ${hex}55,inset 0 2px 5px rgba(255,255,255,0.38);display:flex;align-items:center;justify-content:center;z-index:4;overflow:hidden;`;
+                    start.innerHTML = `<span style="color:rgba(255,255,255,0.85);font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:clamp(7px,1.4vmin,14px);letter-spacing:0.04em;text-shadow:0 1px 2px rgba(0,0,0,0.4)">START</span>`;
                     start.id = `cell-start-${color}`;
                     board.appendChild(start);
+                });
 
+                // ── Home circles ─────────────────────────────────────
+                COLORS.forEach(color => {
+                    const hex = COLOR_DEF[color].hex;
+                    const [light,,dark] = PAWN_COLORS[color];
                     const h = COLOR_DEF[color].home;
+                    const W = 2.5;
                     const home = document.createElement('div');
-                    home.className = 'cell';
-                    home.style.left = `${h.x * cellPct}%`;
-                    home.style.top = `${h.y * cellPct}%`;
-                    home.style.width = `${cellPct * 2}%`;
-                    home.style.height = `${cellPct * 2}%`;
-                    home.style.borderRadius = '50%';
-                    home.style.background = `${COLOR_DEF[color].hex}22`;
+                    home.style.cssText = `position:absolute;left:${(h.x-W/2)*cp}%;top:${(h.y-W/2)*cp}%;width:${W*cp}%;height:${W*cp}%;border-radius:50%;background:radial-gradient(circle at 38% 34%, ${light}bb, ${hex}88 55%, ${dark}66);border:2px solid ${hex}99;box-shadow:0 2px 8px ${hex}44;display:flex;align-items:center;justify-content:center;z-index:4;`;
+                    home.innerHTML = `<span style="color:rgba(255,255,255,0.92);font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:clamp(6px,1.2vmin,12px);text-shadow:0 1px 2px rgba(0,0,0,0.5)">HOME</span>`;
                     home.id = `cell-home-${color}`;
                     board.appendChild(home);
                 });
@@ -1233,11 +1311,11 @@
                 const cell = board.clientWidth / 16;
 
                 State.game.players.forEach(player => {
+                    const [light, mid, dark] = PAWN_COLORS[player.color];
                     player.pawns.forEach((pawn, idx) => {
                         const p = document.createElement('div');
                         p.className = 'pawn';
-                        p.style.background = COLOR_DEF[player.color].hex;
-                        p.innerHTML = '<i class="fa-solid fa-chess-pawn"></i>';
+                        p.style.background = `radial-gradient(circle at 38% 32%, ${light}, ${mid} 55%, ${dark})`;
                         p.id = `pawn-${player.color}-${idx}`;
 
                         const pos = pawnToPixel(player.color, pawn, idx, cell);
