@@ -141,6 +141,52 @@
             aspect-ratio: 5 / 7;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
         }
+
+        .status-chip {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: rgba(15, 23, 42, 0.75);
+            color: #cbd5e1;
+            font-weight: 700;
+        }
+
+        .status-chip-live {
+            color: #86efac;
+            border-color: rgba(34, 197, 94, 0.45);
+            background: rgba(20, 83, 45, 0.35);
+        }
+
+        .status-chip-warn {
+            color: #fcd34d;
+            border-color: rgba(251, 191, 36, 0.45);
+            background: rgba(113, 63, 18, 0.35);
+        }
+
+        .status-chip-danger {
+            color: #fca5a5;
+            border-color: rgba(239, 68, 68, 0.45);
+            background: rgba(127, 29, 29, 0.35);
+        }
+
+        .move-target-preview {
+            box-shadow: inset 0 0 0 3px rgba(56, 189, 248, 0.9), 0 0 14px rgba(56, 189, 248, 0.45);
+            border-radius: 6px;
+            z-index: 70;
+        }
+
+        @media (max-width: 900px) {
+            .hud-condensed {
+                gap: 8px !important;
+            }
+
+            .hud-condensed .compact-hide {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body class="text-slate-100 h-[100dvh] w-screen overflow-hidden flex flex-col selection:bg-emerald-500 selection:text-white">
@@ -295,6 +341,17 @@
                             <div class="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs"><i class="fa-solid fa-1"></i></div>
                             <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Who is playing?</h2>
                         </div>
+
+                        <div class="mb-3 flex gap-2" id="startup-online-tabs">
+                            <button id="tab-host" onclick="setOnlineIntent('host')" class="flex-1 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold tracking-wide">Start as Host</button>
+                            <button id="tab-join" onclick="setOnlineIntent('join')" class="flex-1 py-2 rounded-lg bg-slate-700 text-slate-300 text-xs font-bold tracking-wide border border-slate-600">Join Existing</button>
+                        </div>
+
+                        <div class="mb-3 text-[11px] text-slate-400 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2" id="first-time-tip">
+                            New here? Host creates a room, friends join by code or link.
+                            <button onclick="dismissFirstTimeTip(false)" class="ml-2 text-blue-300 hover:text-blue-200 font-semibold">Skip</button>
+                            <button onclick="dismissFirstTimeTip(true)" class="ml-2 text-slate-300 hover:text-white font-semibold">Never show again</button>
+                        </div>
                         
                         <div class="flex gap-3 mb-6">
                             <button id="mode-local" onclick="selectPlayMode('local')" class="flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(5,150,105,0.4)] ring-2 ring-emerald-400 transform hover:-translate-y-0.5">
@@ -311,17 +368,50 @@
                                 <i class="fa-solid fa-id-card absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
                                 <input type="text" id="player-nickname" placeholder="e.g. Explorer Timmy" class="w-full bg-slate-900/80 text-white font-medium text-sm pl-10 pr-4 py-3 rounded-xl border border-slate-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500 transition-all shadow-inner">
                             </div>
+                            <div class="mt-2 flex flex-wrap gap-1.5" id="nickname-suggestions"></div>
+                            <p id="nickname-warning" class="hidden text-[11px] text-amber-300 mt-1"></p>
                         </div>
 
                         <!-- Dynamic Let's Go Button -->
-                        <button id="btn-lets-go" onclick="handleLetsGo()" class="w-full mt-6 py-4 text-white text-lg font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1">
+                        <button id="btn-lets-go" title="Start or join game" onclick="handleLetsGo()" class="w-full mt-6 py-4 text-white text-lg font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1">
                             <!-- Text injected via JS -->
                         </button>
-                        
-                        <div id="resume-container" class="hidden mt-4">
-                            <button onclick="resumeGame()" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-xl border border-slate-500 transition-all flex justify-center items-center gap-2">
-                                <i class="fa-solid fa-clock-rotate-left"></i> Resume Saved Game
-                            </button>
+
+                        <div id="manual-join-room" class="hidden mt-3">
+                            <label for="join-room-code" class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider ml-1">Join With Room Code</label>
+                            <div class="mt-1.5 flex gap-2 items-center">
+                                <input type="text" id="join-room-code" maxlength="6" placeholder="ABC123" title="Room code" class="flex-1 bg-slate-900/80 text-white font-semibold text-sm px-3 py-2.5 rounded-xl border border-slate-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500 uppercase tracking-widest">
+                                <button id="btn-join-code" onclick="joinRoomByCode()" class="px-4 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold text-sm transition-colors shadow-lg">Join</button>
+                                <button onclick="document.getElementById('recent-rooms-panel').scrollIntoView({behavior:'smooth', block:'nearest'})" class="px-3 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-slate-200 text-xs font-semibold">Recent</button>
+                            </div>
+                            <p class="text-[11px] text-slate-500 mt-1 ml-1">Use this if you have a room code but not the full invite link.</p>
+                        </div>
+
+                        <div id="startup-filter-row" class="hidden mt-4 gap-2 flex-wrap">
+                            <button onclick="setStartupFilter('all')" data-filter="all" class="startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-blue-600 text-white font-semibold">All</button>
+                            <button onclick="setStartupFilter('mine')" data-filter="mine" class="startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-slate-700 text-slate-300 font-semibold border border-slate-600">Mine</button>
+                            <button onclick="setStartupFilter('active')" data-filter="active" class="startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-slate-700 text-slate-300 font-semibold border border-slate-600">Active</button>
+                            <button onclick="setStartupFilter('waiting')" data-filter="waiting" class="startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-slate-700 text-slate-300 font-semibold border border-slate-600">Waiting</button>
+                        </div>
+
+                        <div id="resume-container" class="hidden mt-3">
+                            <div id="startup-session-cards" class="space-y-2 max-h-44 overflow-y-auto pr-1"></div>
+                        </div>
+
+                        <div id="saved-multiplayer-panel" class="hidden mt-4 bg-slate-900/55 border border-slate-700 rounded-xl p-3 text-left">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="text-[11px] font-bold uppercase tracking-widest text-slate-300">Saved Multiplayer Sessions</h4>
+                                <button onclick="refreshStartupHostedSessions()" class="text-[11px] text-blue-300 hover:text-blue-200 font-semibold">Refresh</button>
+                            </div>
+                            <div id="saved-multiplayer-list" class="space-y-2 max-h-40 overflow-y-auto pr-1"></div>
+                        </div>
+
+                        <div id="recent-rooms-panel" class="hidden mt-4 bg-slate-900/55 border border-slate-700 rounded-xl p-3 text-left">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="text-[11px] font-bold uppercase tracking-widest text-slate-300">Recent Multiplayer Rooms</h4>
+                                <button onclick="refreshStartupRecentRooms()" class="text-[11px] text-blue-300 hover:text-blue-200 font-semibold">Refresh</button>
+                            </div>
+                            <div id="recent-rooms-list" class="space-y-2 max-h-40 overflow-y-auto pr-1"></div>
                         </div>
                     </div>
 
@@ -332,13 +422,28 @@
                         </div>
                         
                         <h3 class="text-sm font-bold text-slate-300 mt-2 mb-4" id="lobby-title-text">Invite your friends!</h3>
+
+                        <div class="w-full mb-4 rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-left sticky top-0 z-10">
+                            <div class="flex items-center justify-between gap-2">
+                                <p class="text-xs font-semibold text-slate-200">Room <span id="room-code-pill" class="font-mono text-blue-300">------</span></p>
+                                <div class="flex items-center gap-1.5">
+                                    <span id="room-state-chip" class="status-chip status-chip-warn">Lobby Open</span>
+                                    <span id="host-state-chip" class="status-chip">Host Offline</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 flex gap-1.5">
+                                <button onclick="copyRoomCode()" class="px-2.5 py-1.5 text-[11px] rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold">Copy Code</button>
+                                <button onclick="copyRoomLink()" class="px-2.5 py-1.5 text-[11px] rounded bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold">Copy Link</button>
+                            </div>
+                            <p id="room-timeline" class="mt-2 text-[10px] text-slate-400">Created: - | Players Joined: 0 | Started: - | Saved: - | Finished: -</p>
+                        </div>
                         
                         <div class="bg-white p-3 rounded-2xl mb-5 inline-block shadow-[0_0_20px_rgba(255,255,255,0.1)]" id="qr-container">
-                            <img id="lobby-qr" src="" class="w-32 h-32 md:w-36 md:h-36 object-contain rounded-lg">
+                            <img id="lobby-qr" src="" alt="Room QR code" class="w-32 h-32 md:w-36 md:h-36 object-contain rounded-lg">
                         </div>
                         
                         <div class="w-full flex gap-2 mb-5" id="link-container">
-                            <input type="text" id="lobby-url" readonly class="flex-1 bg-slate-900/80 text-slate-400 text-xs px-4 py-2.5 rounded-xl border border-slate-700 outline-none font-mono shadow-inner text-center">
+                            <input type="text" id="lobby-url" readonly title="Room invite link" placeholder="Invite link appears here" class="flex-1 bg-slate-900/80 text-slate-400 text-xs px-4 py-2.5 rounded-xl border border-slate-700 outline-none font-mono shadow-inner text-center">
                             <button onclick="copyRoomLink()" class="px-5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold transition-colors shadow-lg" title="Copy"><i class="fa-regular fa-copy"></i></button>
                         </div>
 
@@ -352,6 +457,15 @@
                         <button id="btn-start-online" onclick="startGame()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold rounded-xl transition-all shadow-[0_8px_20px_-6px_rgba(16,185,129,0.5)] transform hover:-translate-y-1">
                             Start Multiplayer Game <i class="fa-solid fa-play ml-1"></i>
                         </button>
+
+                        <button id="btn-close-room" onclick="closeCurrentRoom()" class="hidden w-full mt-3 py-2.5 bg-rose-700/80 hover:bg-rose-600 text-white text-sm font-bold rounded-xl border border-rose-400/30 transition-all">
+                            Close Room
+                        </button>
+
+                        <div id="host-quick-actions" class="hidden w-full mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                            <button onclick="resetLobbyState()" class="py-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-100 font-semibold">Reset Lobby</button>
+                            <button onclick="removeLobbySavedState()" class="py-2 bg-rose-700/80 hover:bg-rose-600 rounded text-white font-semibold">Remove Saved State</button>
+                        </div>
                     </div>
                 </div>
 
@@ -378,6 +492,11 @@
 
     <!-- MAIN GAME UI (Forced Landscape Structure) -->
     <div id="main-game-ui" class="hidden flex-row h-[100dvh] w-full overflow-hidden bg-slate-950">
+
+        <div id="reconnect-banner" class="hidden absolute top-3 left-1/2 -translate-x-1/2 z-[80] bg-amber-900/90 border border-amber-500/50 text-amber-100 px-4 py-2 rounded-xl text-xs font-semibold shadow-lg">
+            Reconnecting to live game...
+            <button onclick="retryRealtimeConnections()" class="ml-2 px-2 py-0.5 rounded bg-amber-600/70 hover:bg-amber-500">Retry now</button>
+        </div>
         
         <!-- Game Board Area -->
         <div id="board-area" class="flex-1 h-full flex justify-center items-center overflow-hidden min-w-0 min-h-0 relative z-50">
@@ -410,6 +529,19 @@
                 <div id="turn-banner" class="py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis">
                     Preparing Board...
                 </div>
+                <div class="px-4 pb-2 flex items-center gap-2 flex-wrap">
+                    <span id="connection-chip" class="status-chip">Offline</span>
+                    <span id="autosave-indicator" class="status-chip">Autosave: never</span>
+                    <span id="ingame-room-chip" class="status-chip compact-hide">Room ------</span>
+                    <label class="ml-auto text-[10px] text-slate-400 flex items-center gap-1">
+                        Speed
+                        <select id="animation-speed" onchange="setAnimationSpeed(this.value)" class="bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-slate-200 text-[10px]">
+                            <option value="0.75">Fast</option>
+                            <option value="1" selected>Normal</option>
+                            <option value="1.4">Slow</option>
+                        </select>
+                    </label>
+                </div>
                 <!-- Action Buttons -->
                 <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1.5 md:gap-2">
                     <button onclick="toggleVoiceChat()" id="voice-btn" class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm" title="Voice Chat (Multiplayer)">
@@ -427,7 +559,7 @@
                 </div>
             </div>
 
-            <div class="flex-1 flex flex-col p-3 md:p-5 overflow-hidden gap-3 md:gap-5">
+            <div class="flex-1 flex flex-col p-3 md:p-5 overflow-hidden gap-3 md:gap-5 hud-condensed">
                 
                 <!-- Deck Area -->
                 <div class="flex justify-around items-center bg-slate-900/40 p-3 md:p-5 rounded-2xl border border-slate-700/50 shrink-0 shadow-inner">
@@ -451,14 +583,19 @@
                 </div>
 
                 <div id="action-prompt" class="text-center font-bold text-xs md:text-sm text-amber-400 h-5 shrink-0 flex items-center justify-center tracking-wide"></div>
+                <div id="pending-action-panel" class="text-[11px] bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-slate-200">
+                    Pending: Draw
+                </div>
 
                 <!-- Game Log -->
                 <div class="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-700/50 overflow-hidden shadow-inner min-h-[100px]">
                     <div class="bg-slate-800/80 py-2 px-3 md:px-4 text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest flex justify-between shrink-0 border-b border-slate-700/50 items-center">
                         <span>Action Log</span>
-                        <div class="flex gap-1.5">
-                            <span class="bg-blue-500/20 text-blue-400 px-1 rounded"><i class="fa-solid fa-bolt"></i></span>
-                            <span class="bg-purple-500/20 text-purple-400 px-1 rounded"><i class="fa-solid fa-hurricane"></i></span>
+                        <div class="flex gap-1.5" id="log-filter-buttons">
+                            <button onclick="setLogFilter('all')" class="log-filter-btn px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-300">All</button>
+                            <button onclick="setLogFilter('moves')" class="log-filter-btn px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">Moves</button>
+                            <button onclick="setLogFilter('bumps')" class="log-filter-btn px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">Bumps</button>
+                            <button onclick="setLogFilter('system')" class="log-filter-btn px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">System</button>
                         </div>
                     </div>
                     <div id="game-log" class="flex-1 overflow-y-auto p-3 md:p-4 text-[10px] md:text-xs space-y-2 md:space-y-2.5 text-slate-300 font-medium">
@@ -481,10 +618,11 @@
     <div id="card-modal" class="fixed inset-0 z-[130] bg-slate-900/80 hidden flex-col justify-center items-center p-4 backdrop-blur-md opacity-0 transition-opacity duration-300">
         <div class="playing-card w-[280px] md:w-[320px] bg-white border-4 border-slate-200 rounded-3xl flex flex-col justify-center items-center text-center p-6 shadow-2xl transform scale-95 transition-transform duration-300 relative" id="card-modal-content">
             <div class="absolute inset-2 border-2 border-dashed border-slate-200 rounded-2xl pointer-events-none"></div>
+            <button onclick="hideCardModal()" class="absolute top-3 right-3 w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold z-20" title="Close card details">X</button>
             <span class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 z-10">You Drew</span>
             <span id="modal-card-val" class="font-display text-[100px] md:text-[120px] font-bold leading-none mb-2 pointer-events-none drop-shadow-md z-10"></span>
             <span id="modal-card-desc" class="text-sm md:text-base leading-snug text-slate-600 font-medium px-2 mt-4 z-10 pointer-events-none"></span>
-            <button id="modal-card-btn" class="mt-8 px-8 py-4 w-full text-white font-bold rounded-xl transition-all transform hover:-translate-y-0.5 z-10"></button>
+            <button id="modal-card-btn" title="Confirm card action" class="mt-8 px-8 py-4 w-full text-white font-bold rounded-xl transition-all transform hover:-translate-y-0.5 z-10"></button>
         </div>
     </div>
 
@@ -534,7 +672,7 @@
             
             <div class="p-5 md:p-6 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/50 shrink-0">
                 <h2 class="text-2xl md:text-3xl font-display font-bold text-amber-400 tracking-wider flex items-center gap-3"><i class="fa-solid fa-book-open"></i> Player Guide</h2>
-                <button onclick="toggleInstructions(false)" class="w-10 h-10 flex items-center justify-center rounded-full bg-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-600 transition-colors">
+                <button title="Close instructions" onclick="toggleInstructions(false)" class="w-10 h-10 flex items-center justify-center rounded-full bg-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-600 transition-colors">
                     <i class="fa-solid fa-xmark text-xl"></i>
                 </button>
             </div>
@@ -643,11 +781,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     await SupabaseDB.init();
     session.userId = SupabaseDB.userId;
     updateVoiceButtonUI();
+    await refreshStartupHostedSessions();
+    renderStartupSessionCards();
+    renderNicknameSuggestions();
+    updateAutosaveIndicator();
+    applyConnectionState('Disconnected', false);
+    setOnlineIntent('host');
+    setLogFilter('all');
+    setPendingActionLabel('Draw');
+
+    const hideTip = localStorage.getItem('apologies_hide_onboarding_tip') === '1';
+    if (hideTip) {
+        const firstTip = document.getElementById('first-time-tip');
+        if (firstTip) firstTip.classList.add('hidden');
+    }
+
+    const nicknameInput = document.getElementById('player-nickname');
+    if (nicknameInput) {
+        nicknameInput.addEventListener('input', validateNicknameInput);
+    }
+
+    document.addEventListener('click', markUserInteraction);
+    document.addEventListener('keydown', markUserInteraction);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            const cardModal = document.getElementById('card-modal');
+            if (cardModal && !cardModal.classList.contains('hidden')) {
+                hideCardModal();
+            }
+        }
+    });
+
+    setInterval(() => {
+        updateAutosaveIndicator();
+        if (session.playMode !== 'online' || !session.onlineGameId) return;
+        const activePlayer = gameState.players[gameState.turn];
+        if (!activePlayer || !isControlledByThisDevice(activePlayer)) return;
+        if (Date.now() - lastUserInteractionAt > 90000) {
+            showToast('You seem away. Host handoff may be needed soon.', 'fa-user-clock');
+            lastUserInteractionAt = Date.now();
+        }
+    }, 15000);
     
     let saved = await SupabaseDB.loadGameState();
+    startupSavedSnapshot = saved;
     if (saved && saved.status === 'playing') {
         document.getElementById('resume-container').classList.remove('hidden');
+        if (saved.multiplayerMeta && saved.multiplayerMeta.savedAt) {
+            updateAutosaveIndicator(saved.multiplayerMeta.savedAt);
+        }
     }
+    renderStartupSessionCards();
     
     document.addEventListener('fullscreenchange', () => {
         const btnIcon = document.querySelector('#fullscreen-btn i');
@@ -655,6 +839,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             btnIcon.className = 'fa-solid fa-compress text-xs md:text-sm';
         } else {
             btnIcon.className = 'fa-solid fa-expand text-xs md:text-sm';
+        }
+    });
+
+    const joinByCodeInput = document.getElementById('join-room-code');
+    if (joinByCodeInput) {
+        joinByCodeInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                joinRoomByCode();
+            }
+        });
+    }
+
+    window.addEventListener('popstate', () => {
+        // Keep active host rooms stable even if browser history goes backward.
+        if (session.isHost && session.roomId && session.roomDbId) {
+            setRoomQueryParam(session.roomId, false);
+            updateLobbyInviteArtifacts();
+        }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (gameState && gameState.status && gameState.status !== 'setup') {
+            if (session.playMode === 'online' && session.roomDbId) {
+                gameState.multiplayerMeta = {
+                    roomDbId: session.roomDbId,
+                    roomId: session.roomId,
+                    onlineGameId: session.onlineGameId,
+                    isHost: session.isHost,
+                    players: session.players,
+                    savedAt: new Date().toISOString()
+                };
+            }
+            SupabaseDB.saveGameState(gameState);
         }
     });
 });
@@ -732,6 +950,11 @@ let session = {
     players: []
 };
 
+let hostedSessions = [];
+let hostedSessionMap = {};
+let recentRooms = [];
+let recentRoomMap = {};
+
 let onlineSync = {
     lobbyChannel: null,
     gameChannel: null,
@@ -748,6 +971,366 @@ let voiceChat = {
 };
 
 let isPaused = false;
+let onlineIntent = 'host';
+let startupFilter = 'all';
+let currentLogFilter = 'all';
+let animationSpeed = 1;
+let lastAutosaveAt = null;
+let startupSavedSnapshot = null;
+let roomTimeline = {
+    createdAt: null,
+    playersJoined: 0,
+    startedAt: null,
+    savedAt: null,
+    finishedAt: null
+};
+let lastUserInteractionAt = Date.now();
+
+const NICKNAME_SUGGESTIONS = ['Swift Fox', 'Lucky Nova', 'Board Ace', 'Calm Comet', 'Dice Ranger'];
+
+function scaledDelay(ms) {
+    return Math.max(60, Math.round(ms * animationSpeed));
+}
+
+function formatRelativeTime(iso) {
+    if (!iso) return 'Never';
+    const delta = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    if (delta < 60) return `${delta}s ago`;
+    if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
+    if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`;
+    return `${Math.floor(delta / 86400)}d ago`;
+}
+
+function setAnimationSpeed(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    animationSpeed = parsed;
+}
+
+function updateAutosaveIndicator(dateLike = null) {
+    if (dateLike) lastAutosaveAt = new Date(dateLike).toISOString();
+    const el = document.getElementById('autosave-indicator');
+    if (!el) return;
+    el.innerText = `Autosave: ${lastAutosaveAt ? formatRelativeTime(lastAutosaveAt) : 'never'}`;
+}
+
+function applyConnectionState(status, allowRetry = false) {
+    const chip = document.getElementById('connection-chip');
+    const banner = document.getElementById('reconnect-banner');
+    if (!chip || !banner) return;
+
+    chip.className = 'status-chip';
+    if (status === 'Live') chip.classList.add('status-chip-live');
+    if (status === 'Reconnecting') chip.classList.add('status-chip-warn');
+    if (status === 'Disconnected') chip.classList.add('status-chip-danger');
+    chip.innerText = status;
+
+    if (allowRetry || status === 'Reconnecting' || status === 'Disconnected') {
+        banner.classList.remove('hidden');
+    } else {
+        banner.classList.add('hidden');
+    }
+
+    if (status === 'Reconnecting') {
+        setTimeout(() => {
+            if (session.roomDbId || session.onlineGameId) retryRealtimeConnections();
+        }, 2200);
+    }
+}
+
+function retryRealtimeConnections() {
+    if (session.onlineGameId) subscribeToGameRealtime();
+    if (session.roomDbId) subscribeLobbyRealtime();
+    applyConnectionState('Reconnecting', true);
+}
+
+function setOnlineIntent(intent) {
+    onlineIntent = intent === 'join' ? 'join' : 'host';
+    const tabHost = document.getElementById('tab-host');
+    const tabJoin = document.getElementById('tab-join');
+    if (tabHost && tabJoin) {
+        tabHost.className = onlineIntent === 'host'
+            ? 'flex-1 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold tracking-wide'
+            : 'flex-1 py-2 rounded-lg bg-slate-700 text-slate-300 text-xs font-bold tracking-wide border border-slate-600';
+        tabJoin.className = onlineIntent === 'join'
+            ? 'flex-1 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold tracking-wide'
+            : 'flex-1 py-2 rounded-lg bg-slate-700 text-slate-300 text-xs font-bold tracking-wide border border-slate-600';
+    }
+    const joinInput = document.getElementById('join-room-code');
+    if (onlineIntent === 'join' && joinInput) joinInput.focus();
+}
+
+function dismissFirstTimeTip(neverShow) {
+    const tip = document.getElementById('first-time-tip');
+    if (tip) tip.classList.add('hidden');
+    if (neverShow) localStorage.setItem('apologies_hide_onboarding_tip', '1');
+}
+
+function renderNicknameSuggestions() {
+    const holder = document.getElementById('nickname-suggestions');
+    if (!holder) return;
+    holder.innerHTML = NICKNAME_SUGGESTIONS.map(name => `
+        <button onclick="applyNicknameSuggestion('${name}')" class="px-2 py-1 rounded-full bg-slate-700/90 border border-slate-600 text-[11px] text-slate-200 hover:bg-slate-600">${name}</button>
+    `).join('');
+}
+
+function applyNicknameSuggestion(name) {
+    const input = document.getElementById('player-nickname');
+    if (!input) return;
+    input.value = name;
+    validateNicknameInput();
+}
+
+function validateNicknameInput() {
+    const input = document.getElementById('player-nickname');
+    const warning = document.getElementById('nickname-warning');
+    if (!input || !warning) return true;
+    const val = input.value.trim();
+    const blocked = /(admin|owner|mod|fuck|shit)/i.test(val);
+    const invalid = !val || val.length < 2;
+    if (blocked || invalid) {
+        warning.innerText = blocked ? 'Nickname contains blocked words. Choose another.' : 'Nickname must be at least 2 characters.';
+        warning.classList.remove('hidden');
+        return false;
+    }
+    warning.classList.add('hidden');
+    return true;
+}
+
+function setStartupFilter(filterName) {
+    startupFilter = filterName;
+    document.querySelectorAll('.startup-filter-btn').forEach(btn => {
+        const isActive = btn.dataset.filter === filterName;
+        btn.className = isActive
+            ? 'startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-blue-600 text-white font-semibold'
+            : 'startup-filter-btn px-2.5 py-1 text-[11px] rounded-full bg-slate-700 text-slate-300 font-semibold border border-slate-600';
+    });
+    renderStartupSessionCards();
+}
+
+function togglePinnedRoom(roomCode) {
+    if (!roomCode) return;
+    const key = 'apologies_pinned_rooms';
+    const current = JSON.parse(localStorage.getItem(key) || '[]');
+    const next = current.includes(roomCode)
+        ? current.filter(c => c !== roomCode)
+        : [...current, roomCode];
+    localStorage.setItem(key, JSON.stringify(next));
+    renderStartupSessionCards();
+}
+
+function getPinnedRooms() {
+    return JSON.parse(localStorage.getItem('apologies_pinned_rooms') || '[]');
+}
+
+function getUnifiedStartupSessions() {
+    const cards = [];
+    hostedSessions.forEach(s => {
+        cards.push({
+            key: `host-${s.id}`,
+            mode: 'Host',
+            roomCode: s.room_code,
+            dbId: s.id,
+            state: s.activeGame ? 'active' : 'waiting',
+            lastActiveAt: (s.activeGame && s.activeGame.updated_at) || s.started_at || s.created_at,
+            players: s.players || [],
+            hostOnline: true,
+            mine: true,
+            primaryAction: `resumeHostedSession('${s.id}')`
+        });
+    });
+    recentRooms.forEach(r => {
+        cards.push({
+            key: `recent-${r.id}`,
+            mode: 'Guest',
+            roomCode: r.room_code,
+            dbId: r.id,
+            state: r.activeGame ? 'active' : 'waiting',
+            lastActiveAt: r.lastJoinedAt || r.created_at,
+            players: r.connectedPlayers || [],
+            hostOnline: !!r.hostOnline,
+            mine: false,
+            primaryAction: `rejoinRecentRoom('${r.id}')`
+        });
+    });
+    const savedMeta = (startupSavedSnapshot && startupSavedSnapshot.multiplayerMeta)
+        ? startupSavedSnapshot.multiplayerMeta
+        : ((gameState && gameState.multiplayerMeta) ? gameState.multiplayerMeta : null);
+    if (savedMeta && savedMeta.roomId) {
+        cards.push({
+            key: `local-${savedMeta.roomDbId || savedMeta.roomId}`,
+            mode: 'Local Save',
+            roomCode: savedMeta.roomId,
+            dbId: savedMeta.roomDbId || '',
+            state: savedMeta.onlineGameId ? 'active' : 'waiting',
+            lastActiveAt: savedMeta.savedAt,
+            players: Array.isArray(savedMeta.players) ? savedMeta.players : [],
+            hostOnline: !!savedMeta.isHost,
+            mine: true,
+            primaryAction: 'resumeGame()'
+        });
+    }
+    return cards.sort((a, b) => new Date(b.lastActiveAt || 0) - new Date(a.lastActiveAt || 0));
+}
+
+function renderStartupSessionCards() {
+    const wrap = document.getElementById('resume-container');
+    const list = document.getElementById('startup-session-cards');
+    const filterRow = document.getElementById('startup-filter-row');
+    if (!wrap || !list || !filterRow) return;
+
+    const cards = getUnifiedStartupSessions();
+    let filtered = cards;
+    if (startupFilter === 'mine') filtered = cards.filter(c => c.mine);
+    if (startupFilter === 'active') filtered = cards.filter(c => c.state === 'active');
+    if (startupFilter === 'waiting') filtered = cards.filter(c => c.state === 'waiting');
+
+    if (!filtered.length) {
+        list.innerHTML = `
+            <div class="rounded-xl border border-dashed border-slate-600 bg-slate-900/50 p-3 text-center text-slate-400 text-xs">
+                <i class="fa-regular fa-folder-open mr-1"></i> No sessions for this filter yet.
+            </div>
+        `;
+        wrap.classList.remove('hidden');
+        filterRow.classList.remove('hidden');
+        return;
+    }
+
+    const pins = getPinnedRooms();
+    list.innerHTML = filtered.map(card => {
+        const pinned = pins.includes(card.roomCode);
+        const modeLabel = card.mode;
+        const stateLabel = card.state === 'active' ? 'Game Active' : 'Lobby Open';
+        const hostChip = card.hostOnline ? '<span class="status-chip status-chip-live">Host Online</span>' : '<span class="status-chip">Host Offline</span>';
+        const mismatch = session.nickname && card.players.some(p => p && p.name && p.name !== session.nickname) && card.mode !== 'Host';
+        return `
+            <div class="bg-slate-800/70 border border-slate-700 rounded-lg p-2.5">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs font-bold text-slate-100">${modeLabel} | Room ${card.roomCode}</p>
+                    <button onclick="togglePinnedRoom('${card.roomCode}')" class="text-amber-300 text-xs">${pinned ? 'Unpin' : 'Pin'}</button>
+                </div>
+                <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+                    <span class="status-chip ${card.state === 'active' ? 'status-chip-live' : 'status-chip-warn'}">${stateLabel}</span>
+                    ${hostChip}
+                    <span class="status-chip">${card.players.length} players</span>
+                    <span class="status-chip">${formatRelativeTime(card.lastActiveAt)}</span>
+                </div>
+                ${mismatch ? '<p class="text-[10px] text-amber-300 mt-1">Nickname differs from previous room identity.</p>' : ''}
+                <div class="mt-2 flex gap-1.5">
+                    <button onclick="${card.primaryAction}" class="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-white text-[11px] font-semibold">Resume</button>
+                    <button onclick="copyTextToClipboard('${buildRoomUrl(card.roomCode)}')" class="py-1.5 px-2.5 bg-slate-700 hover:bg-slate-600 rounded text-slate-200 text-[11px] font-semibold">Copy Link</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    wrap.classList.remove('hidden');
+    filterRow.classList.remove('hidden');
+}
+
+function updateRoomStatusChips() {
+    const roomCodePill = document.getElementById('room-code-pill');
+    const gameRoomChip = document.getElementById('ingame-room-chip');
+    const roomStateChip = document.getElementById('room-state-chip');
+    const hostStateChip = document.getElementById('host-state-chip');
+    if (roomCodePill) roomCodePill.innerText = session.roomId || '------';
+    if (gameRoomChip) gameRoomChip.innerText = `Room ${session.roomId || '------'}`;
+
+    if (roomStateChip) {
+        const stateText = session.onlineGameId ? 'Game Active' : 'Lobby Open';
+        roomStateChip.className = `status-chip ${session.onlineGameId ? 'status-chip-live' : 'status-chip-warn'}`;
+        roomStateChip.innerText = stateText;
+    }
+    if (hostStateChip) {
+        const hostOnline = session.players.some(p => p.isHost);
+        hostStateChip.className = `status-chip ${hostOnline ? 'status-chip-live' : ''}`;
+        hostStateChip.innerText = hostOnline ? 'Host Online' : 'Host Offline';
+    }
+}
+
+function updateRoomTimeline(partial = {}) {
+    roomTimeline = { ...roomTimeline, ...partial };
+    const el = document.getElementById('room-timeline');
+    if (!el) return;
+    el.innerText = `Created: ${formatRelativeTime(roomTimeline.createdAt)} | Players Joined: ${roomTimeline.playersJoined || 0} | Started: ${formatRelativeTime(roomTimeline.startedAt)} | Saved: ${formatRelativeTime(roomTimeline.savedAt)} | Finished: ${formatRelativeTime(roomTimeline.finishedAt)}`;
+}
+
+function setPendingActionLabel(label) {
+    const panel = document.getElementById('pending-action-panel');
+    if (!panel) return;
+    panel.innerText = `Pending: ${label}`;
+}
+
+function setLogFilter(filterName) {
+    currentLogFilter = filterName;
+    document.querySelectorAll('.log-filter-btn').forEach(btn => {
+        const selected = btn.innerText.toLowerCase() === filterName;
+        btn.className = selected
+            ? 'log-filter-btn px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-300'
+            : 'log-filter-btn px-1.5 py-0.5 rounded bg-slate-700 text-slate-300';
+    });
+    document.querySelectorAll('#game-log > div').forEach(row => {
+        const type = row.dataset.logType || 'system';
+        row.classList.toggle('hidden', filterName !== 'all' && type !== filterName);
+    });
+}
+
+function playCue(type) {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const tone = type === 'bump' ? 180 : type === 'win' ? 520 : type === 'turn' ? 320 : 260;
+        osc.type = 'sine';
+        osc.frequency.value = tone;
+        gain.gain.value = 0.015;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+    } catch {}
+}
+
+function markUserInteraction() {
+    lastUserInteractionAt = Date.now();
+}
+
+function copyRoomCode() {
+    if (!session.roomId) return;
+    copyTextToClipboard(session.roomId);
+}
+
+async function resetLobbyState() {
+    if (!session.isHost || !session.roomDbId || !SupabaseDB.client) return;
+    const ok = confirm('Reset lobby assignments and remove active game save?');
+    if (!ok) return;
+    await removeLobbySavedState();
+    await refreshLobbyPlayersFromDB();
+    buildPlayerConfigUI();
+    showToast('Lobby reset complete.', 'fa-rotate-left');
+}
+
+async function removeLobbySavedState() {
+    if (!session.isHost || !session.roomDbId || !SupabaseDB.client) return;
+    try {
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('games')
+            .delete()
+            .eq('room_id', session.roomDbId);
+        session.onlineGameId = null;
+        updateRoomStatusChips();
+        updateRoomTimeline({ savedAt: new Date().toISOString() });
+        showToast('Saved room state removed.', 'fa-trash');
+    } catch (err) {
+        showToast('Unable to remove saved state.', 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: removeLobbySavedState
+        });
+    }
+}
 
 function stateHash(stateObj) {
     try {
@@ -801,6 +1384,43 @@ function clearRoomQueryParam() {
     } catch {}
 }
 
+function buildRoomUrl(roomCode) {
+    return window.location.protocol + '//' + window.location.host + window.location.pathname + '?room=' + roomCode;
+}
+
+function setRoomQueryParam(roomCode, push = true) {
+    if (!roomCode) return;
+    const url = buildRoomUrl(roomCode);
+    if (push) {
+        window.history.pushState({ path: url }, '', url);
+    } else {
+        window.history.replaceState({ path: url }, '', url);
+    }
+}
+
+function buildQrUrl(targetUrl) {
+    return `https://quickchart.io/qr?size=180&text=${encodeURIComponent(targetUrl)}`;
+}
+
+function buildQrUrlFallback(targetUrl) {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(targetUrl)}`;
+}
+
+function updateLobbyInviteArtifacts() {
+    if (!session.roomId) return;
+    const inviteUrl = buildRoomUrl(session.roomId);
+    const qr = document.getElementById('lobby-qr');
+    const urlInput = document.getElementById('lobby-url');
+    if (qr) {
+        qr.onerror = () => {
+            qr.onerror = null;
+            qr.src = buildQrUrlFallback(inviteUrl);
+        };
+        qr.src = buildQrUrl(inviteUrl);
+    }
+    if (urlInput) urlInput.value = inviteUrl;
+}
+
 function restoreModeButtonsFromJoinState() {
     const btnLocal = document.getElementById('mode-local');
     const btnOnline = document.getElementById('mode-online');
@@ -817,14 +1437,19 @@ function configureLobbyRoleUI() {
     const qrContainer = document.getElementById('qr-container');
     const linkContainer = document.getElementById('link-container');
     const startBtn = document.getElementById('btn-start-online');
+    const closeBtn = document.getElementById('btn-close-room');
+    const hostActions = document.getElementById('host-quick-actions');
 
-    if (!hostBadge || !lobbyTitle || !qrContainer || !linkContainer || !startBtn) return;
+    if (!hostBadge || !lobbyTitle || !qrContainer || !linkContainer || !startBtn || !closeBtn || !hostActions) return;
 
     if (session.isHost) {
         hostBadge.classList.remove('hidden');
         lobbyTitle.innerText = session.roomId ? `Room: ${session.roomId}` : 'Invite your friends!';
         qrContainer.classList.remove('hidden');
         linkContainer.classList.remove('hidden');
+        closeBtn.classList.remove('hidden');
+        hostActions.classList.remove('hidden');
+        updateLobbyInviteArtifacts();
 
         startBtn.innerHTML = 'Start Multiplayer Game <i class="fa-solid fa-play ml-1"></i>';
         startBtn.classList.remove('bg-slate-600', 'cursor-not-allowed');
@@ -836,6 +1461,8 @@ function configureLobbyRoleUI() {
         lobbyTitle.innerText = session.roomId ? `Joining Room: ${session.roomId}` : 'Joining Room...';
         qrContainer.classList.add('hidden');
         linkContainer.classList.add('hidden');
+        closeBtn.classList.add('hidden');
+        hostActions.classList.add('hidden');
 
         startBtn.innerHTML = "Waiting for Host... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
         startBtn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
@@ -843,6 +1470,512 @@ function configureLobbyRoleUI() {
         startBtn.disabled = true;
         startBtn.onclick = null;
     }
+
+    updateRoomStatusChips();
+}
+
+async function fetchHostedSessions() {
+    if (!SupabaseDB.client || !session.userId) return [];
+
+    const { data: rooms, error: roomErr } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('rooms')
+        .select('id,room_code,status,created_at,started_at')
+        .eq('host_user_id', session.userId)
+        .in('status', ['waiting', 'active'])
+        .order('created_at', { ascending: false });
+
+    if (roomErr) throw roomErr;
+    if (!rooms || rooms.length === 0) return [];
+
+    const roomIds = rooms.map(r => r.id);
+
+    const { data: roomPlayers } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('room_players')
+        .select('room_id,user_id,is_host,joined_at,left_at')
+        .in('room_id', roomIds)
+        .order('joined_at', { ascending: true });
+
+    const { data: activeGames } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('games')
+        .select('id,room_id,status,state,updated_at,created_at')
+        .in('room_id', roomIds)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+    const userIds = Array.from(new Set((roomPlayers || []).map(p => p.user_id)));
+    let profiles = [];
+
+    if (userIds.length > 0) {
+        const { data: profileRows } = await SupabaseDB.client
+            .schema('Apologies')
+            .from('profiles')
+            .select('user_id,nickname')
+            .in('user_id', userIds);
+
+        profiles = profileRows || [];
+    }
+
+    const profileMap = {};
+    profiles.forEach(p => { profileMap[p.user_id] = p.nickname; });
+
+    return rooms.map(room => {
+        const players = (roomPlayers || [])
+            .filter(p => p.room_id === room.id && !p.left_at)
+            .map(p => ({
+                id: p.user_id,
+                name: profileMap[p.user_id] || `Player ${String(p.user_id).slice(0, 6)}`,
+                isHost: !!p.is_host
+            }));
+
+        const game = (activeGames || []).find(g => g.room_id === room.id) || null;
+
+        return {
+            ...room,
+            players,
+            activeGame: game
+        };
+    });
+}
+
+function renderHostedSessionsList() {
+    const panel = document.getElementById('saved-multiplayer-panel');
+    const list = document.getElementById('saved-multiplayer-list');
+    if (!panel || !list) return;
+
+    if (!hostedSessions.length) {
+        panel.classList.remove('hidden');
+        list.innerHTML = `<div class="rounded-lg border border-dashed border-slate-600 bg-slate-900/40 p-3 text-center text-slate-400 text-xs"><i class="fa-regular fa-circle-play mr-1"></i> No hosted rooms yet.</div>`;
+        renderStartupSessionCards();
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    list.innerHTML = hostedSessions.map(s => {
+        const statusLabel = s.activeGame ? 'In Progress' : 'Lobby Waiting';
+        const playersLabel = s.players.length ? s.players.map(p => p.name).join(', ') : 'No players connected';
+        const roomUrl = buildRoomUrl(s.room_code);
+        const timeline = formatRelativeTime((s.activeGame && s.activeGame.updated_at) || s.started_at || s.created_at);
+
+        return `
+            <div class="bg-slate-800/70 border border-slate-700 rounded-lg p-2.5">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs font-bold text-slate-200">Room ${s.room_code}</p>
+                    <span class="text-[10px] uppercase tracking-wider ${s.activeGame ? 'text-emerald-300' : 'text-amber-300'}">${statusLabel}</span>
+                </div>
+                <div class="mt-1 flex gap-1.5 flex-wrap">
+                    <span class="status-chip ${s.activeGame ? 'status-chip-live' : 'status-chip-warn'}">${s.activeGame ? 'Game Active' : 'Lobby Open'}</span>
+                    <span class="status-chip status-chip-live">Host Online</span>
+                    <span class="status-chip">${s.players.length} players</span>
+                    <span class="status-chip">${timeline}</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1 truncate">${playersLabel}</p>
+                <div class="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+                    <button onclick="resumeHostedSession('${s.id}')" class="py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-white font-semibold">Resume</button>
+                    <button onclick="copyTextToClipboard('${roomUrl}')" class="py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-slate-200 font-semibold">Copy Link</button>
+                    <button onclick="deleteHostedGame('${s.id}', '${s.activeGame ? s.activeGame.id : ''}')" class="py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-slate-200 font-semibold ${s.activeGame ? '' : 'opacity-50 cursor-not-allowed'}" ${s.activeGame ? '' : 'disabled'}>Delete Save</button>
+                    <button onclick="deleteHostedRoom('${s.id}')" class="py-1.5 bg-rose-700/90 hover:bg-rose-600 rounded text-white font-semibold">Delete Room</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    renderStartupSessionCards();
+}
+
+async function refreshStartupHostedSessions() {
+    if (!SupabaseDB.client || !session.userId) return;
+
+    try {
+        hostedSessions = await fetchHostedSessions();
+        hostedSessionMap = {};
+        hostedSessions.forEach(s => {
+            hostedSessionMap[s.id] = s;
+        });
+        renderHostedSessionsList();
+    } catch (err) {
+        console.warn('Unable to load hosted sessions:', err);
+    }
+
+    await refreshStartupRecentRooms();
+}
+
+async function fetchRecentRooms() {
+    if (!SupabaseDB.client || !session.userId) return [];
+
+    const { data: memberships, error: memberErr } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('room_players')
+        .select('room_id,joined_at,left_at')
+        .eq('user_id', session.userId)
+        .order('joined_at', { ascending: false })
+        .limit(50);
+
+    if (memberErr) throw memberErr;
+    if (!memberships || memberships.length === 0) return [];
+
+    const seen = new Set();
+    const uniqueMemberships = [];
+    memberships.forEach(m => {
+        if (seen.has(m.room_id)) return;
+        seen.add(m.room_id);
+        uniqueMemberships.push(m);
+    });
+
+    const roomIds = uniqueMemberships.map(m => m.room_id);
+
+    const { data: rooms, error: roomErr } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('rooms')
+        .select('id,room_code,status,host_user_id,created_at,started_at')
+        .in('id', roomIds)
+        .in('status', ['waiting', 'active'])
+        .neq('host_user_id', session.userId);
+
+    if (roomErr) throw roomErr;
+    if (!rooms || rooms.length === 0) return [];
+
+    const activeRoomIds = rooms.map(r => r.id);
+
+    const { data: roomPlayers } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('room_players')
+        .select('room_id,user_id,is_host,left_at,joined_at')
+        .in('room_id', activeRoomIds)
+        .order('joined_at', { ascending: true });
+
+    const { data: activeGames } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('games')
+        .select('id,room_id,status,updated_at')
+        .in('room_id', activeRoomIds)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+    const userIds = Array.from(new Set((roomPlayers || []).map(p => p.user_id)));
+    const { data: profiles } = userIds.length
+        ? await SupabaseDB.client
+            .schema('Apologies')
+            .from('profiles')
+            .select('user_id,nickname')
+            .in('user_id', userIds)
+        : { data: [] };
+
+    const profileMap = {};
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p.nickname; });
+
+    return rooms.map(room => {
+        const latestMembership = uniqueMemberships.find(m => m.room_id === room.id);
+        const hostPlayer = (roomPlayers || []).find(p => p.room_id === room.id && p.user_id === room.host_user_id);
+        const hostOnline = !!(hostPlayer && !hostPlayer.left_at);
+        const hostName = profileMap[room.host_user_id] || 'Host';
+        const connectedPlayers = (roomPlayers || [])
+            .filter(p => p.room_id === room.id && !p.left_at)
+            .map(p => ({
+                id: p.user_id,
+                name: profileMap[p.user_id] || `Player ${String(p.user_id).slice(0, 6)}`,
+                isHost: !!p.is_host
+            }));
+
+        return {
+            ...room,
+            connectedPlayers,
+            hostName,
+            hostOnline,
+            activeGame: (activeGames || []).find(g => g.room_id === room.id) || null,
+            lastJoinedAt: latestMembership ? latestMembership.joined_at : room.created_at
+        };
+    }).sort((a, b) => new Date(b.lastJoinedAt || 0) - new Date(a.lastJoinedAt || 0));
+}
+
+function renderRecentRoomsList() {
+    const panel = document.getElementById('recent-rooms-panel');
+    const list = document.getElementById('recent-rooms-list');
+    if (!panel || !list) return;
+
+    if (!recentRooms.length || session.playMode === 'local') {
+        if (session.playMode === 'local') {
+            panel.classList.add('hidden');
+            list.innerHTML = '';
+        } else {
+            panel.classList.remove('hidden');
+            list.innerHTML = `<div class="rounded-lg border border-dashed border-slate-600 bg-slate-900/40 p-3 text-center text-slate-400 text-xs"><i class="fa-regular fa-compass mr-1"></i> No recent rooms yet.</div>`;
+        }
+        renderStartupSessionCards();
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    list.innerHTML = recentRooms.map(r => {
+        const statusLabel = r.activeGame ? 'Game Active' : 'Lobby Open';
+        const connected = r.connectedPlayers.length ? r.connectedPlayers.map(p => p.name).join(', ') : 'No active players';
+        const roomUrl = buildRoomUrl(r.room_code);
+        const hostPresenceClass = r.hostOnline ? 'text-emerald-300' : 'text-slate-400';
+        const hostPresenceText = r.hostOnline ? 'Host online' : 'Host offline';
+        const seenAgo = formatRelativeTime(r.lastJoinedAt || r.created_at);
+
+        return `
+            <div class="bg-slate-800/70 border border-slate-700 rounded-lg p-2.5">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs font-bold text-slate-200">Room ${r.room_code}</p>
+                    <span class="text-[10px] uppercase tracking-wider ${r.activeGame ? 'text-emerald-300' : 'text-amber-300'}">${statusLabel}</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2">
+                    <p class="text-[11px] text-slate-400 truncate">Host: ${r.hostName}</p>
+                    <span class="text-[10px] uppercase tracking-wider ${hostPresenceClass}">${hostPresenceText}</span>
+                </div>
+                <div class="mt-1 flex gap-1.5 flex-wrap">
+                    <span class="status-chip ${r.activeGame ? 'status-chip-live' : 'status-chip-warn'}">${statusLabel}</span>
+                    <span class="status-chip">${r.connectedPlayers.length} players</span>
+                    <span class="status-chip">${seenAgo}</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1 truncate">${connected}</p>
+                <div class="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+                    <button onclick="rejoinRecentRoom('${r.id}')" class="py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-white font-semibold">Rejoin</button>
+                    <button onclick="copyTextToClipboard('${roomUrl}')" class="py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-slate-200 font-semibold">Copy Link</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    renderStartupSessionCards();
+}
+
+async function refreshStartupRecentRooms() {
+    if (!SupabaseDB.client || !session.userId) return;
+
+    try {
+        recentRooms = await fetchRecentRooms();
+        recentRoomMap = {};
+        recentRooms.forEach(r => {
+            recentRoomMap[r.id] = r;
+        });
+        renderRecentRoomsList();
+    } catch (err) {
+        console.warn('Unable to load recent rooms:', err);
+    }
+}
+
+async function rejoinRecentRoom(roomDbId) {
+    const roomData = recentRoomMap[roomDbId];
+    if (!roomData) {
+        showToast('Room not found. Try refreshing.', 'fa-triangle-exclamation');
+        return;
+    }
+
+    const nickname = document.getElementById('player-nickname').value.trim();
+    if (!nickname) {
+        showToast('Enter your nickname first.', 'fa-triangle-exclamation');
+        return;
+    }
+
+    session.nickname = nickname;
+    session.playMode = 'online';
+    session.roomId = roomData.room_code;
+    session.roomDbId = null;
+    session.onlineGameId = null;
+    session.isHost = false;
+    session.joiningViaLink = true;
+
+    setRoomQueryParam(session.roomId, false);
+    selectPlayMode('online');
+    updateRoomStatusChips();
+    await setupOnlineLobby();
+}
+
+async function resumeHostedSession(roomDbId) {
+    const sessionData = hostedSessionMap[roomDbId];
+    if (!sessionData) {
+        showToast('Saved session not found. Try refreshing.', 'fa-triangle-exclamation');
+        return;
+    }
+
+    session.playMode = 'online';
+    session.roomDbId = sessionData.id;
+    session.roomId = sessionData.room_code;
+    session.isHost = true;
+    session.joiningViaLink = false;
+    session.players = sessionData.players || [];
+
+    const typedNick = document.getElementById('player-nickname').value.trim();
+    if (typedNick) session.nickname = typedNick;
+    if (!session.nickname) {
+        session.nickname = 'Host';
+        document.getElementById('player-nickname').value = session.nickname;
+    }
+
+    await upsertMyProfile();
+
+    await SupabaseDB.client
+        .schema('Apologies')
+        .from('room_players')
+        .upsert({
+            room_id: session.roomDbId,
+            user_id: session.userId,
+            is_host: true,
+            joined_at: new Date().toISOString(),
+            left_at: null
+        }, { onConflict: 'room_id,user_id' });
+
+    setRoomQueryParam(session.roomId, false);
+    document.getElementById('auth-section').classList.add('hidden');
+    document.getElementById('lobby-section').classList.remove('hidden');
+    document.getElementById('lobby-section').classList.add('flex');
+
+    configureLobbyRoleUI();
+    await refreshLobbyPlayersFromDB();
+    subscribeLobbyRealtime();
+    updateRoomStatusChips();
+    updateRoomTimeline({ createdAt: sessionData.created_at || new Date().toISOString() });
+
+    if (sessionData.activeGame && sessionData.activeGame.state) {
+        session.onlineGameId = sessionData.activeGame.id;
+        beginOnlineGameFromState(sessionData.activeGame.state);
+        subscribeToGameRealtime();
+        showToast('Multiplayer game resumed.', 'fa-rotate-right');
+        return;
+    }
+
+    session.onlineGameId = null;
+    updateVoiceButtonUI();
+    showToast('Lobby resumed.', 'fa-door-open');
+}
+
+async function deleteHostedRoom(roomDbId) {
+    if (!roomDbId) return;
+    if (!window.confirm('Delete this multiplayer room and all associated game data?')) return;
+
+    try {
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .delete()
+            .eq('id', roomDbId)
+            .eq('host_user_id', session.userId);
+
+        if (session.roomDbId === roomDbId) {
+            if (voiceChat.enabled) stopVoiceChat();
+            if (onlineSync.lobbyChannel) SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+            if (onlineSync.gameChannel) SupabaseDB.client.removeChannel(onlineSync.gameChannel);
+            onlineSync.lobbyChannel = null;
+            onlineSync.gameChannel = null;
+
+            session.roomDbId = null;
+            session.roomId = null;
+            session.onlineGameId = null;
+            session.isHost = false;
+            session.joiningViaLink = false;
+            session.players = [];
+            updateRoomTimeline({ createdAt: null, playersJoined: 0, startedAt: null, savedAt: null, finishedAt: null });
+
+            clearRoomQueryParam();
+            restoreModeButtonsFromJoinState();
+            document.getElementById('lobby-section').classList.add('hidden');
+            document.getElementById('lobby-section').classList.remove('flex');
+            document.getElementById('auth-section').classList.remove('hidden');
+            selectPlayMode('online');
+        }
+
+        await refreshStartupHostedSessions();
+        showToast('Room deleted.', 'fa-trash');
+    } catch (err) {
+        console.warn(err);
+        showToast('Unable to delete room.', 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: () => deleteHostedRoom(roomDbId)
+        });
+    }
+}
+
+async function deleteHostedGame(roomDbId, gameId) {
+    if (!roomDbId || !gameId) return;
+    if (!window.confirm('Delete the saved multiplayer game state for this room?')) return;
+
+    try {
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('games')
+            .delete()
+            .eq('id', gameId);
+
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .update({ status: 'waiting', started_at: null })
+            .eq('id', roomDbId);
+
+        if (session.roomDbId === roomDbId) {
+            session.onlineGameId = null;
+        }
+
+        await refreshStartupHostedSessions();
+        showToast('Saved game removed from room.', 'fa-trash');
+    } catch (err) {
+        console.warn(err);
+        showToast('Unable to delete saved game.', 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: () => deleteHostedGame(roomDbId, gameId)
+        });
+    }
+}
+
+async function closeCurrentRoom(confirmClose = true) {
+    if (!session.isHost || !session.roomDbId || !SupabaseDB.client) return;
+    if (confirmClose && !window.confirm('Close this room for everyone and clear its game data?')) return;
+
+    try {
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .delete()
+            .eq('id', session.roomDbId)
+            .eq('host_user_id', session.userId);
+
+        if (voiceChat.enabled) stopVoiceChat();
+        if (onlineSync.lobbyChannel) SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+        if (onlineSync.gameChannel) SupabaseDB.client.removeChannel(onlineSync.gameChannel);
+
+        onlineSync.lobbyChannel = null;
+        onlineSync.gameChannel = null;
+
+        document.getElementById('lobby-section').classList.add('hidden');
+        document.getElementById('lobby-section').classList.remove('flex');
+        document.getElementById('auth-section').classList.remove('hidden');
+
+        session.roomDbId = null;
+        session.roomId = null;
+        session.onlineGameId = null;
+        session.isHost = false;
+        session.joiningViaLink = false;
+        session.players = [];
+        updateRoomTimeline({ createdAt: null, playersJoined: 0, startedAt: null, savedAt: null, finishedAt: null });
+
+        clearRoomQueryParam();
+        restoreModeButtonsFromJoinState();
+        selectPlayMode('online');
+        updateVoiceButtonUI();
+        await refreshStartupHostedSessions();
+
+        showToast('Room closed.', 'fa-door-closed');
+    } catch (err) {
+        console.warn(err);
+        showToast('Unable to close room.', 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: () => closeCurrentRoom(false)
+        });
+    }
+}
+
+function copyTextToClipboard(value) {
+    const temp = document.createElement('textarea');
+    temp.value = value || '';
+    document.body.appendChild(temp);
+    temp.select();
+    document.execCommand('copy');
+    temp.remove();
+    showToast('Copied to clipboard!', 'fa-copy');
 }
 
 /**
@@ -873,6 +2006,8 @@ function selectPlayMode(mode) {
     const btnOnline = document.getElementById('mode-online');
     const nicknameSection = document.getElementById('nickname-section');
     const btnLetsGo = document.getElementById('btn-lets-go');
+    const joinManual = document.getElementById('manual-join-room');
+    const recentPanel = document.getElementById('recent-rooms-panel');
     
     if (mode === 'local') {
         btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
@@ -886,6 +2021,8 @@ function selectPlayMode(mode) {
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1';
         btnLetsGo.innerHTML = 'Start Game <i class="fa-solid fa-play ml-1 text-sm"></i>';
+        if (joinManual) joinManual.classList.add('hidden');
+        if (recentPanel) recentPanel.classList.add('hidden');
         
         buildPlayerConfigUI();
     } else {
@@ -900,7 +2037,11 @@ function selectPlayMode(mode) {
         nicknameSection.classList.remove('hidden', 'opacity-0');
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1';
-        btnLetsGo.innerHTML = 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>';
+        btnLetsGo.innerHTML = onlineIntent === 'join'
+            ? 'Join Lobby <i class="fa-solid fa-right-to-bracket ml-1 text-sm"></i>'
+            : 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>';
+        if (joinManual) joinManual.classList.remove('hidden');
+        renderRecentRoomsList();
         
         buildPlayerConfigUI();
     }
@@ -911,15 +2052,80 @@ function selectPlayMode(mode) {
 async function handleLetsGo() {
     if (session.playMode === 'online') {
         const nameInput = document.getElementById('player-nickname').value.trim();
+        if (!validateNicknameInput()) return showToast('Please enter a valid nickname!', 'fa-triangle-exclamation');
         if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
         
         session.nickname = nameInput;
+
+        if (onlineIntent === 'join') {
+            const codeInput = document.getElementById('join-room-code');
+            if (!codeInput || !codeInput.value.trim()) {
+                return showToast('Enter room code to join existing lobby.', 'fa-triangle-exclamation');
+            }
+            return joinRoomByCode();
+        }
+
+        session.joiningViaLink = false;
         await setupOnlineLobby();
     } else {
         // "JUST ME" FLOW: Skip lobby, skip nickname, start instantly!
         session.nickname = 'You';
         startGame(); 
     }
+}
+
+async function preflightJoinRoom(code) {
+    if (!SupabaseDB.client) {
+        return { ok: false, message: 'No connection to multiplayer server.' };
+    }
+    const { data: room, error } = await SupabaseDB.client
+        .schema('Apologies')
+        .from('rooms')
+        .select('id,status,room_code')
+        .eq('room_code', code)
+        .maybeSingle();
+
+    if (error || !room) return { ok: false, message: 'Room not found. Check the room code.' };
+    if (!['waiting', 'active'].includes(room.status)) return { ok: false, message: 'Room is not joinable right now.' };
+    return { ok: true, room };
+}
+
+async function joinRoomByCode() {
+    const input = document.getElementById('join-room-code');
+    const nickname = document.getElementById('player-nickname').value.trim();
+    const codeRaw = (input ? input.value : '').trim();
+    const code = codeRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (!nickname || !validateNicknameInput()) {
+        showToast('Enter your nickname first.', 'fa-triangle-exclamation');
+        return;
+    }
+
+    if (!code || code.length < 4) {
+        showToast('Enter a valid room code.', 'fa-triangle-exclamation');
+        return;
+    }
+
+    const preflight = await preflightJoinRoom(code);
+    if (!preflight.ok) {
+        showToast(preflight.message, 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: joinRoomByCode
+        });
+        return;
+    }
+
+    session.nickname = nickname;
+    session.playMode = 'online';
+    session.roomId = code;
+    session.roomDbId = null;
+    session.onlineGameId = null;
+    session.isHost = false;
+    session.joiningViaLink = true;
+
+    setRoomQueryParam(session.roomId, false);
+    selectPlayMode('online');
+    await setupOnlineLobby();
 }
 
 async function upsertMyProfile() {
@@ -991,6 +2197,9 @@ async function refreshLobbyPlayersFromDB() {
         isHost: !!p.is_host
     }));
 
+    updateRoomTimeline({ playersJoined: session.players.length });
+    updateRoomStatusChips();
+
     renderLobbyPlayers();
     buildPlayerConfigUI();
     if (voiceChat.enabled) connectVoiceToCurrentPlayers();
@@ -1019,7 +2228,11 @@ function subscribeLobbyRealtime() {
         }, async () => {
             await checkForActiveOnlineGame();
         })
-        .subscribe();
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') applyConnectionState('Live', false);
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') applyConnectionState('Reconnecting', true);
+            if (status === 'CLOSED') applyConnectionState('Disconnected', true);
+        });
 }
 
 async function checkForActiveOnlineGame() {
@@ -1067,7 +2280,11 @@ function subscribeToGameRealtime() {
             renderGameFromSyncedState();
             onlineSync.applyingRemote = false;
         })
-        .subscribe();
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') applyConnectionState('Live', false);
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') applyConnectionState('Reconnecting', true);
+            if (status === 'CLOSED') applyConnectionState('Disconnected', true);
+        });
 }
 
 async function pushOnlineGameState(reason = '') {
@@ -1130,8 +2347,12 @@ function applyActiveTurnUI() {
     if (!activePlayer) return;
 
     let banner = document.getElementById('turn-banner');
+    const controllerLabel = activePlayer.type === 'CPU'
+        ? 'CPU'
+        : (isControlledByThisDevice(activePlayer) ? 'This Device' : 'Remote Device');
+
     banner.className = `py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis ${COLOR_CODES[activePlayer.color].bg}`;
-    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color}</span>`;
+    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color} | ${controllerLabel}</span>`;
 
     const deck = document.getElementById('deck');
     const canControl = isControlledByThisDevice(activePlayer);
@@ -1146,8 +2367,10 @@ function applyActiveTurnUI() {
 
     if (!canControl) {
         setActionPrompt(`Waiting for ${activePlayer.name}...`);
+        setPendingActionLabel('Waiting for remote player');
     } else if (gameState.currentCard === null) {
         setActionPrompt('Click the deck to draw a card.');
+        setPendingActionLabel('Draw');
     }
 }
 
@@ -1173,18 +2396,23 @@ async function setupOnlineLobby() {
             const { data: room, error: roomErr } = await SupabaseDB.client
                 .schema('Apologies')
                 .from('rooms')
-                .select('id, room_code, host_user_id')
+                .select('id, room_code, host_user_id, status, created_at')
                 .eq('room_code', session.roomId)
                 .maybeSingle();
 
             if (roomErr || !room) {
                 throw new Error('Room not found. Check the invite link.');
             }
+            if (!['waiting', 'active'].includes(room.status)) {
+                throw new Error('Room is closed or not joinable.');
+            }
 
             session.roomDbId = room.id;
             session.roomId = room.room_code;
             session.isHost = room.host_user_id === session.userId;
             session.joiningViaLink = false;
+            updateRoomTimeline({ createdAt: room.created_at || new Date().toISOString(), startedAt: null, savedAt: null, finishedAt: null });
+            if (session.isHost) setRoomQueryParam(session.roomId, false);
             configureLobbyRoleUI();
 
             await SupabaseDB.client
@@ -1202,6 +2430,8 @@ async function setupOnlineLobby() {
             subscribeLobbyRealtime();
             await checkForActiveOnlineGame();
             updateVoiceButtonUI();
+            await refreshStartupHostedSessions();
+            updateRoomStatusChips();
             showToast('Connected to Room!');
             return;
         }
@@ -1211,13 +2441,11 @@ async function setupOnlineLobby() {
         session.roomId = room.room_code;
         session.isHost = true;
         session.joiningViaLink = false;
+        updateRoomTimeline({ createdAt: new Date().toISOString(), startedAt: null, savedAt: null, finishedAt: null });
         configureLobbyRoleUI();
 
-        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + session.roomId;
-        window.history.pushState({ path: newUrl }, '', newUrl);
-
-        document.getElementById('lobby-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(newUrl)}`;
-        document.getElementById('lobby-url').value = newUrl;
+        setRoomQueryParam(session.roomId, true);
+        updateLobbyInviteArtifacts();
 
         await SupabaseDB.client
             .schema('Apologies')
@@ -1233,9 +2461,14 @@ async function setupOnlineLobby() {
         await refreshLobbyPlayersFromDB();
         subscribeLobbyRealtime();
         updateVoiceButtonUI();
+        await refreshStartupHostedSessions();
+        updateRoomStatusChips();
     } catch (err) {
         console.error('setupOnlineLobby error:', err);
-        showToast(`Unable to set up online lobby: ${err?.message || err}`, 'fa-triangle-exclamation');
+        showToast(`Unable to set up online lobby: ${err?.message || err}`, 'fa-triangle-exclamation', {
+            retryLabel: 'Retry',
+            onRetry: setupOnlineLobby
+        });
 
         document.getElementById('auth-section').classList.remove('hidden');
         document.getElementById('lobby-section').classList.add('hidden');
@@ -1248,6 +2481,7 @@ async function setupOnlineLobby() {
         session.roomDbId = null;
         session.onlineGameId = null;
         session.players = [];
+        updateRoomTimeline({ createdAt: null, playersJoined: 0, startedAt: null, savedAt: null, finishedAt: null });
         updateVoiceButtonUI();
 
         if (session.roomId && !session.roomDbId) {
@@ -1258,6 +2492,8 @@ async function setupOnlineLobby() {
             clearRoomQueryParam();
             selectPlayMode('online');
         }
+
+        await refreshStartupHostedSessions();
     }
 }
 
@@ -1318,16 +2554,24 @@ function buildPlayerConfigUI() {
 
 function copyRoomLink() {
     const urlInput = document.getElementById('lobby-url');
-    urlInput.select();
-    document.execCommand('copy');
-    showToast('Room link copied to clipboard!');
+    copyTextToClipboard((urlInput && urlInput.value) || '');
 }
 
-function showToast(message, icon = 'fa-check') {
+function showToast(message, icon = 'fa-check', options = null) {
     const toast = document.createElement('div');
-    toast.className = `fixed top-6 right-6 bg-slate-800/95 backdrop-blur-sm border border-slate-600 text-white px-5 py-3 rounded-2xl shadow-2xl z-[200] flex items-center gap-3 transform transition-all duration-400 translate-x-[150%] font-medium`;
-    toast.innerHTML = `<div class="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center"><i class="fa-solid ${icon} text-emerald-400 text-sm"></i></div> <span>${message}</span>`;
+    toast.className = `fixed top-6 right-6 bg-slate-800/95 backdrop-blur-sm border border-slate-600 text-white px-5 py-3 rounded-2xl shadow-2xl z-[200] flex items-center gap-3 transform transition-all duration-400 translate-x-[150%] font-medium max-w-[320px]`;
+    const retryHtml = options && typeof options.onRetry === 'function'
+        ? `<button class="ml-2 px-2 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-[11px] font-semibold" data-retry="1">${options.retryLabel || 'Retry'}</button>`
+        : '';
+    toast.innerHTML = `<div class="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center"><i class="fa-solid ${icon} text-emerald-400 text-sm"></i></div> <span class="text-sm">${message}</span>${retryHtml}`;
     document.body.appendChild(toast);
+    const retryBtn = toast.querySelector('[data-retry="1"]');
+    if (retryBtn && options && typeof options.onRetry === 'function') {
+        retryBtn.addEventListener('click', () => {
+            options.onRetry();
+            toast.remove();
+        });
+    }
     requestAnimationFrame(() => toast.classList.remove('translate-x-[150%]'));
     setTimeout(() => {
         toast.classList.add('translate-x-[150%]');
@@ -1528,17 +2772,132 @@ function stopVoiceChat() {
 /**
  * SAVE & RESUME & PAUSE LOGIC
  */
-function saveGame() {
-    SupabaseDB.saveGameState(gameState);
-    pushOnlineGameState('saveGame');
+async function saveGame() {
+    if (session.playMode === 'online' && session.roomDbId) {
+        gameState.multiplayerMeta = {
+            roomDbId: session.roomDbId,
+            roomId: session.roomId,
+            onlineGameId: session.onlineGameId,
+            isHost: session.isHost,
+            players: session.players,
+            savedAt: new Date().toISOString()
+        };
+    }
+
+    await SupabaseDB.saveGameState(gameState);
+    startupSavedSnapshot = gameState;
+    await pushOnlineGameState('saveGame');
+    updateAutosaveIndicator(new Date().toISOString());
+    updateRoomTimeline({ savedAt: new Date().toISOString() });
+    if (session.playMode === 'online') await refreshStartupHostedSessions();
     showToast('Game progress saved!', 'fa-cloud-arrow-up');
 }
 
 async function resumeGame() {
     let saved = await SupabaseDB.loadGameState();
     if (!saved) return;
+
+    const meta = saved.multiplayerMeta;
+
+    if (meta && meta.roomDbId && meta.roomId && SupabaseDB.client && session.userId) {
+        try {
+            session.playMode = 'online';
+            session.roomDbId = meta.roomDbId;
+            session.roomId = meta.roomId;
+            session.onlineGameId = meta.onlineGameId || null;
+            session.isHost = !!meta.isHost;
+            session.joiningViaLink = false;
+            session.players = Array.isArray(meta.players) ? meta.players : [];
+
+            const typedNick = document.getElementById('player-nickname').value.trim();
+            if (typedNick) session.nickname = typedNick;
+            if (!session.nickname) session.nickname = 'Player';
+
+            await upsertMyProfile();
+
+            const { data: room, error: roomErr } = await SupabaseDB.client
+                .schema('Apologies')
+                .from('rooms')
+                .select('id,room_code,host_user_id,status')
+                .eq('id', session.roomDbId)
+                .maybeSingle();
+
+            if (roomErr || !room) throw new Error('Saved multiplayer room no longer exists.');
+
+            session.roomId = room.room_code;
+            session.isHost = room.host_user_id === session.userId;
+
+            await SupabaseDB.client
+                .schema('Apologies')
+                .from('room_players')
+                .upsert({
+                    room_id: session.roomDbId,
+                    user_id: session.userId,
+                    is_host: session.isHost,
+                    joined_at: new Date().toISOString(),
+                    left_at: null
+                }, { onConflict: 'room_id,user_id' });
+
+            setRoomQueryParam(session.roomId, false);
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('lobby-section').classList.remove('hidden');
+            document.getElementById('lobby-section').classList.add('flex');
+            configureLobbyRoleUI();
+
+            await refreshLobbyPlayersFromDB();
+            subscribeLobbyRealtime();
+
+            let resumedGameState = null;
+
+            if (session.onlineGameId) {
+                const { data: gameRow } = await SupabaseDB.client
+                    .schema('Apologies')
+                    .from('games')
+                    .select('id,state,status')
+                    .eq('id', session.onlineGameId)
+                    .eq('status', 'active')
+                    .maybeSingle();
+
+                if (gameRow && gameRow.state) resumedGameState = gameRow.state;
+            }
+
+            if (!resumedGameState) {
+                const { data: activeGame } = await SupabaseDB.client
+                    .schema('Apologies')
+                    .from('games')
+                    .select('id,state,status')
+                    .eq('room_id', session.roomDbId)
+                    .eq('status', 'active')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (activeGame && activeGame.state) {
+                    session.onlineGameId = activeGame.id;
+                    resumedGameState = activeGame.state;
+                }
+            }
+
+            if (resumedGameState) {
+                beginOnlineGameFromState(resumedGameState);
+                subscribeToGameRealtime();
+                showToast('Resumed multiplayer game.', 'fa-rotate-right');
+            } else {
+                showToast('Resumed multiplayer lobby.', 'fa-door-open');
+            }
+
+            if (meta.savedAt) updateAutosaveIndicator(meta.savedAt);
+
+            await refreshStartupHostedSessions();
+            return;
+        } catch (err) {
+            console.warn('resumeGame multiplayer fallback:', err);
+            showToast(err?.message || 'Unable to resume multiplayer session.', 'fa-triangle-exclamation');
+        }
+    }
     
     gameState = saved;
+    startupSavedSnapshot = saved;
     isPaused = false;
     
     document.getElementById('startup-screen').classList.add('hidden');
@@ -1594,7 +2953,20 @@ function toggleInstructions(show) {
 }
 
 async function quitGame() {
-    SupabaseDB.saveGameState(gameState);
+    if (session.playMode === 'online' && session.roomDbId) {
+        gameState.multiplayerMeta = {
+            roomDbId: session.roomDbId,
+            roomId: session.roomId,
+            onlineGameId: session.onlineGameId,
+            isHost: session.isHost,
+            players: session.players,
+            savedAt: new Date().toISOString()
+        };
+    }
+
+    await SupabaseDB.saveGameState(gameState);
+    startupSavedSnapshot = gameState;
+    updateAutosaveIndicator(new Date().toISOString());
     if (voiceChat.enabled) stopVoiceChat();
 
     if (session.playMode === 'online' && SupabaseDB.client && session.roomDbId && session.userId) {
@@ -1628,10 +3000,21 @@ async function quitGame() {
     if (onlineSync.gameChannel && SupabaseDB.client) SupabaseDB.client.removeChannel(onlineSync.gameChannel);
     onlineSync.lobbyChannel = null;
     onlineSync.gameChannel = null;
+    session.roomId = null;
     session.roomDbId = null;
     session.onlineGameId = null;
+    session.isHost = false;
+    session.joiningViaLink = false;
     session.players = [];
+    clearRoomQueryParam();
+    restoreModeButtonsFromJoinState();
+    document.getElementById('lobby-section').classList.add('hidden');
+    document.getElementById('lobby-section').classList.remove('flex');
+    document.getElementById('auth-section').classList.remove('hidden');
+    selectPlayMode('local');
     updateVoiceButtonUI();
+    await refreshStartupHostedSessions();
+    renderStartupSessionCards();
 }
 
 function clearSaveAndReload() {
@@ -1690,8 +3073,20 @@ async function startGame() {
     
     gameState.status = 'playing';
     gameState.turn = 0;
+    if (session.playMode === 'online' && session.roomDbId) {
+        gameState.multiplayerMeta = {
+            roomDbId: session.roomDbId,
+            roomId: session.roomId,
+            onlineGameId: null,
+            isHost: session.isHost,
+            players: session.players,
+            savedAt: new Date().toISOString()
+        };
+        updateRoomTimeline({ startedAt: new Date().toISOString(), savedAt: new Date().toISOString() });
+    }
     isPaused = false;
-    SupabaseDB.saveGameState(gameState);
+    await SupabaseDB.saveGameState(gameState);
+    updateAutosaveIndicator(new Date().toISOString());
 
     if (session.playMode === 'online' && SupabaseDB.client && session.roomDbId) {
         try {
@@ -1712,6 +3107,7 @@ async function startGame() {
 
             if (gameErr) throw gameErr;
             session.onlineGameId = gameRow.id;
+            if (gameState.multiplayerMeta) gameState.multiplayerMeta.onlineGameId = gameRow.id;
 
             await SupabaseDB.client
                 .schema('Apologies')
@@ -1721,6 +3117,7 @@ async function startGame() {
 
             subscribeToGameRealtime();
             await pushOnlineGameState('startGame');
+            await refreshStartupHostedSessions();
         } catch (err) {
             console.warn(err);
             showToast('Unable to start synchronized multiplayer game.', 'fa-triangle-exclamation');
@@ -1966,12 +3363,16 @@ function updateDeckUI() {
     }
 }
 
-function log(msg) {
+function log(msg, type = 'system') {
     const logBox = document.getElementById('game-log');
     let div = document.createElement('div');
     div.className = "border-b border-slate-700/30 pb-2 mb-1";
+    div.dataset.logType = type;
     div.innerHTML = msg; 
     logBox.appendChild(div);
+    if (currentLogFilter !== 'all' && currentLogFilter !== type) {
+        div.classList.add('hidden');
+    }
     logBox.scrollTop = logBox.scrollHeight;
 }
 
@@ -1988,8 +3389,11 @@ function startTurn() {
     gameState.status = 'playing';
     let activePlayer = gameState.players[gameState.turn];
     let banner = document.getElementById('turn-banner');
+    const controllerLabel = activePlayer.type === 'CPU'
+        ? 'CPU'
+        : (isControlledByThisDevice(activePlayer) ? 'This Device' : 'Remote Device');
     banner.className = `py-3 md:py-4 pl-4 pr-24 text-left font-display font-bold text-base md:text-lg text-white transition-colors duration-500 shadow-inner overflow-hidden whitespace-nowrap text-ellipsis ${COLOR_CODES[activePlayer.color].bg}`;
-    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color}</span>`;
+    banner.innerHTML = `<span class="tracking-wider">${activePlayer.name}'s Turn</span> <span class="text-[10px] md:text-xs opacity-80 block -mt-1 font-sans font-medium uppercase tracking-widest">${activePlayer.color} | ${controllerLabel}</span>`;
     
     gameState.currentCard = null;
     gameState.selectedPawnForSorry = null;
@@ -2002,19 +3406,24 @@ function startTurn() {
         document.getElementById('deck').classList.add('cursor-not-allowed', 'opacity-60');
         document.getElementById('deck').classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
         if (isControlledByThisDevice(activePlayer)) {
-            setTimeout(cpuTurn, 200);
+            setPendingActionLabel('CPU thinking');
+            setTimeout(cpuTurn, scaledDelay(200));
         } else {
             setActionPrompt(`Waiting for ${activePlayer.name}...`);
+            setPendingActionLabel('Waiting for remote player');
         }
     } else {
         if (isControlledByThisDevice(activePlayer)) {
             document.getElementById('deck').classList.remove('cursor-not-allowed', 'opacity-60');
             document.getElementById('deck').classList.add('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
             setActionPrompt("Click the deck to draw a card.");
+            setPendingActionLabel('Draw');
+            playCue('turn');
         } else {
             document.getElementById('deck').classList.add('cursor-not-allowed', 'opacity-60');
             document.getElementById('deck').classList.remove('hover:-translate-y-1', 'hover:shadow-[0_0_15px_rgba(96,165,250,0.4)]');
             setActionPrompt(`Waiting for ${activePlayer.name}...`);
+            setPendingActionLabel('Waiting for remote player');
         }
     }
 }
@@ -2039,7 +3448,8 @@ function drawCard() {
     if (cardName === 9) cardName = '<span class="text-red-500 font-display">BULLDOZER</span>';
     if (cardName === 14) cardName = '<span class="text-emerald-400 font-display">SAFETY DASH</span>';
 
-    log(`<span class="font-bold ${COLOR_CODES[gameState.players[gameState.turn].color].text}">${gameState.players[gameState.turn].name}</span> drew a ${cardName}`);
+    log(`<span class="font-bold ${COLOR_CODES[gameState.players[gameState.turn].color].text}">${gameState.players[gameState.turn].name}</span> drew a ${cardName}`, 'moves');
+    playCue('draw');
     pushOnlineGameState('drawCard');
 }
 
@@ -2049,6 +3459,7 @@ function processDrawnCard() {
     gameState.pendingMoves = moves;
 
     gameState.status = 'resolving_card';
+    setPendingActionLabel('Confirm move');
 
     // Show popup modal for human players instead of silently skipping/highlighting
     showCardModal(gameState.currentCard, moves, activePlayer);
@@ -2081,8 +3492,9 @@ function showCardModal(cardVal, moves, activePlayer) {
         btnEl.onclick = () => {
             hideCardModal();
             setActionPrompt("No valid moves available.");
+            setPendingActionLabel('Turn ending');
             gameState.status = 'turn_ending'; 
-            setTimeout(() => endTurn(gameState.currentCard === 2), 200);
+            setTimeout(() => endTurn(gameState.currentCard === 2), scaledDelay(200));
         };
     } else {
         btnEl.className = "mt-8 px-8 py-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-[0_5px_15px_-3px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-0.5 z-10";
@@ -2091,8 +3503,16 @@ function showCardModal(cardVal, moves, activePlayer) {
             hideCardModal();
             gameState.status = 'waiting_pawn_selection';
             setActionPrompt("Select a glowing pawn to move.");
+            setPendingActionLabel('Select pawn');
             moves.forEach(m => {
                 document.getElementById(`pawn-${activePlayer.color}-${m.pawnIndex}`).classList.add('pawn-highlight');
+                const targetCellId = m.targetType === 'BOARD'
+                    ? `cell-BOARD-${m.targetPos}`
+                    : (m.targetType === 'SAFETY' ? `cell-SAFETY-${activePlayer.color}-${m.targetPos}` : null);
+                if (targetCellId) {
+                    const target = document.getElementById(targetCellId);
+                    if (target) target.classList.add('move-target-preview');
+                }
             });
         };
     }
@@ -2108,6 +3528,7 @@ function showCardModal(cardVal, moves, activePlayer) {
 function hideCardModal() {
     const modal = document.getElementById('card-modal');
     const content = document.getElementById('card-modal-content');
+    document.querySelectorAll('.move-target-preview').forEach(el => el.classList.remove('move-target-preview'));
     modal.style.pointerEvents = 'none'; // Prevent invisible ghost clicks during animation
     modal.classList.add('opacity-0');
     content.classList.add('scale-95');
@@ -2174,6 +3595,7 @@ function cancelChoice() {
     hideChoiceModal();
     gameState.status = 'waiting_pawn_selection';
     setActionPrompt("Select a glowing pawn to move.");
+    setPendingActionLabel('Select pawn');
 }
 
 /**
@@ -2387,6 +3809,7 @@ function onPawnClick(e) {
         if (clickedColor !== activePlayer.color) {
             let targetPawn = gameState.players.find(p => p.color === clickedColor).pawns[clickedId];
             if (targetPawn.type === 'BOARD') {
+                setPendingActionLabel('Confirm move');
                 executeSorryMove(gameState.selectedPawnForSorry, clickedColor, clickedId, targetPawn.pos);
             }
         }
@@ -2410,6 +3833,7 @@ function onPawnClick(e) {
         gameState.selectedPawnForSorry = clickedId;
         gameState.status = 'waiting_sorry_target';
         setActionPrompt("Click an opponent's pawn to bump.");
+        setPendingActionLabel('Confirm move');
         
         updatePawnPositions(); 
         gameState.players.forEach(opp => {
@@ -2426,6 +3850,7 @@ function onPawnClick(e) {
     if (myMoves.length > 1) {
         showChoiceModal(activePlayer, myMoves);
     } else {
+        setPendingActionLabel('Confirm move');
         executeMove(activePlayer, myMoves[0]);
     }
 }
@@ -2445,15 +3870,21 @@ function executeSorryMove(myStartIdx, oppColor, oppIdx, targetBoardPos) {
 }
 
 function executeMove(player, moveData) {
+    const riskyMove = moveData.isTrapdoor || moveData.isMud || (moveData.bumped && moveData.bumped.length > 0);
+    if (riskyMove) {
+        const proceed = confirm('Confirm risky move? This may bump or penalize pawns.');
+        if (!proceed) return;
+    }
+
     let pawn = player.pawns[moveData.pawnIndex];
     
     pawn.type = moveData.targetType;
     pawn.pos = moveData.targetPos;
 
-    if (moveData.isSafetyDash) log(`<i class="fa-solid fa-jet-fighter text-emerald-400"></i> SAFETY DASH! Warped to Safety!`);
+    if (moveData.isSafetyDash) log(`<i class="fa-solid fa-jet-fighter text-emerald-400"></i> SAFETY DASH! Warped to Safety!`, 'moves');
     
     if (moveData.isEarthquake) {
-        log(`<i class="fa-solid fa-house-crack text-orange-400"></i> EARTHQUAKE! Opponents knocked back!`);
+        log(`<i class="fa-solid fa-house-crack text-orange-400"></i> EARTHQUAKE! Opponents knocked back!`, 'system');
         gameState.players.forEach(opp => {
             if (opp.color !== player.color) {
                 opp.pawns.forEach(op => {
@@ -2463,20 +3894,21 @@ function executeMove(player, moveData) {
         });
     }
 
-    if (moveData.isBulldozer) log(`<i class="fa-solid fa-truck-monster text-red-500"></i> BULLDOZER! Cleared the path!`);
+    if (moveData.isBulldozer) log(`<i class="fa-solid fa-truck-monster text-red-500"></i> BULLDOZER! Cleared the path!`, 'system');
 
-    if (moveData.isSlide) log(`${player.color} took a slide!`);
-    if (moveData.isSpring) log(`<i class="fa-solid fa-bolt text-blue-400"></i> ${player.color} hit a SPRINGBOARD! (+4)`);
-    if (moveData.isMud) log(`<i class="fa-solid fa-triangle-exclamation text-red-400"></i> ${player.color} fell in MUD! (-4)`);
-    if (moveData.isPortal) log(`<i class="fa-solid fa-hurricane text-purple-400"></i> ${player.color} warped through a PORTAL!`);
-    if (moveData.isTrapdoor) log(`<i class="fa-solid fa-skull text-stone-400"></i> OH NO! ${player.color} fell in a TRAPDOOR!`);
+    if (moveData.isSlide) log(`${player.color} took a slide!`, 'moves');
+    if (moveData.isSpring) log(`<i class="fa-solid fa-bolt text-blue-400"></i> ${player.color} hit a SPRINGBOARD! (+4)`, 'system');
+    if (moveData.isMud) log(`<i class="fa-solid fa-triangle-exclamation text-red-400"></i> ${player.color} fell in MUD! (-4)`, 'system');
+    if (moveData.isPortal) log(`<i class="fa-solid fa-hurricane text-purple-400"></i> ${player.color} warped through a PORTAL!`, 'system');
+    if (moveData.isTrapdoor) log(`<i class="fa-solid fa-skull text-stone-400"></i> OH NO! ${player.color} fell in a TRAPDOOR!`, 'system');
 
     if (moveData.bumped && moveData.bumped.length > 0) {
         moveData.bumped.forEach(b => {
             let bPlayer = gameState.players.find(p => p.color === b.playerColor);
             bPlayer.pawns[b.pawnIdx].type = 'START';
             bPlayer.pawns[b.pawnIdx].pos = 0;
-            log(`${player.color} bumped ${b.playerColor}!`);
+            log(`${player.color} bumped ${b.playerColor}!`, 'bumps');
+            playCue('bump');
         });
     }
 
@@ -2486,7 +3918,11 @@ function executeMove(player, moveData) {
 function finalizeMoveAndTurn() {
     updatePawnPositions();
     SupabaseDB.saveGameState(gameState);
+    updateAutosaveIndicator(new Date().toISOString());
+    updateRoomTimeline({ savedAt: new Date().toISOString() });
     gameState.pendingMoves = [];
+    document.querySelectorAll('.move-target-preview').forEach(el => el.classList.remove('move-target-preview'));
+    setPendingActionLabel('Turn ending');
     pushOnlineGameState('finalizeMoveAndTurn');
     
     // Engine Lockout prevents clicking while turn transition is pending
@@ -2495,12 +3931,41 @@ function finalizeMoveAndTurn() {
     if (checkWinCondition()) return;
 
     let isCPU = gameState.players[gameState.turn].type === 'CPU';
-    let delay = isCPU ? 200 : 1000;
+    let delay = isCPU ? scaledDelay(200) : scaledDelay(1000);
 
     let drawAgain = (gameState.currentCard === 2);
-    if (drawAgain) log(`${gameState.players[gameState.turn].name} draws again!`);
+    if (drawAgain) log(`${gameState.players[gameState.turn].name} draws again!`, 'system');
 
     setTimeout(() => endTurn(drawAgain), delay);
+}
+
+async function cleanupFinishedOnlineGame() {
+    if (!SupabaseDB.client || !session.roomDbId) return;
+
+    try {
+        if (session.isHost) {
+            if (session.onlineGameId) {
+                await SupabaseDB.client
+                    .schema('Apologies')
+                    .from('games')
+                    .update({ status: 'finished', updated_at: new Date().toISOString() })
+                    .eq('id', session.onlineGameId);
+            }
+
+            await SupabaseDB.client
+                .schema('Apologies')
+                .from('rooms')
+                .delete()
+                .eq('id', session.roomDbId)
+                .eq('host_user_id', session.userId);
+        }
+
+        updateRoomTimeline({ finishedAt: new Date().toISOString() });
+
+        await refreshStartupHostedSessions();
+    } catch (err) {
+        console.warn('cleanupFinishedOnlineGame failed:', err);
+    }
 }
 
 function checkWinCondition() {
@@ -2509,6 +3974,10 @@ function checkWinCondition() {
     if (homeCount === 4) {
         gameState.status = 'gameover';
         SupabaseDB.clearSave(); 
+        if (session.playMode === 'online') {
+            cleanupFinishedOnlineGame();
+        }
+        playCue('win');
         document.getElementById('win-screen').classList.remove('hidden');
         document.getElementById('win-screen').classList.add('flex');
         document.getElementById('win-message').innerText = `${activePlayer.name} WINS!`;
@@ -2520,7 +3989,7 @@ function checkWinCondition() {
 function endTurn(drawAgain) {
     if (gameState.status === 'gameover') return;
     if (isPaused) {
-        setTimeout(() => endTurn(drawAgain), 500); 
+        setTimeout(() => endTurn(drawAgain), scaledDelay(500)); 
         return;
     }
     if (!drawAgain) gameState.turn = (gameState.turn + 1) % gameState.players.length;
@@ -2536,7 +4005,7 @@ function endTurn(drawAgain) {
 function cpuTurn() {
     if (gameState.status !== 'playing') return;
     if(isPaused) {
-        setTimeout(cpuTurn, 500);
+        setTimeout(cpuTurn, scaledDelay(500));
         return;
     }
     
@@ -2547,9 +4016,10 @@ function cpuTurn() {
         let moves = calculateValidMoves(activePlayer, gameState.currentCard);
 
         if (moves.length === 0) {
-            log(`${activePlayer.name} has no valid moves.`);
+            log(`${activePlayer.name} has no valid moves.`, 'system');
             gameState.status = 'turn_ending';
-            setTimeout(() => endTurn(gameState.currentCard === 2), 200); 
+            setPendingActionLabel('Turn ending');
+            setTimeout(() => endTurn(gameState.currentCard === 2), scaledDelay(200)); 
             return;
         }
 
@@ -2605,7 +4075,7 @@ function cpuTurn() {
         });
 
         executeMove(activePlayer, bestMove);
-    }, 400);
+    }, scaledDelay(400));
 }
 </script>
 </body>
