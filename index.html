@@ -335,11 +335,21 @@
                 <!-- Left Column: Settings, Auth & Actions -->
                 <div class="flex flex-col gap-8 h-full">
                     
-                    <!-- Who is playing? -->
+                    <!-- Startup Flow -->
                     <div id="auth-section" class="bg-slate-800/50 p-5 md:p-6 rounded-2xl border border-slate-700/50 shadow-inner">
                         <div class="flex items-center gap-2 mb-5">
                             <div class="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xs"><i class="fa-solid fa-1"></i></div>
-                            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Who is playing?</h2>
+                            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Step 1: New Or Resume?</h2>
+                        </div>
+
+                        <div class="flex gap-3 mb-5" id="startup-action-tabs">
+                            <button id="startup-new" onclick="setStartupAction('new')" class="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold ring-2 ring-emerald-400">Start New Game</button>
+                            <button id="startup-resume" onclick="setStartupAction('resume')" class="flex-1 py-3 rounded-xl bg-slate-700 text-slate-300 font-bold border border-slate-600">Resume Previous Game</button>
+                        </div>
+
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-6 h-6 rounded bg-blue-500/20 flex items-center justify-center text-blue-300 text-xs"><i class="fa-solid fa-2"></i></div>
+                            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-widest">Step 2: Who Is Playing?</h2>
                         </div>
 
                         <div class="mb-3 flex gap-2" id="startup-online-tabs">
@@ -396,6 +406,11 @@
 
                         <div id="resume-container" class="hidden mt-3">
                             <div id="startup-session-cards" class="space-y-2 max-h-44 overflow-y-auto pr-1"></div>
+                        </div>
+
+                        <div id="resume-local-panel" class="hidden mt-3 bg-slate-900/55 border border-slate-700 rounded-xl p-3 text-left">
+                            <h4 class="text-[11px] font-bold uppercase tracking-widest text-slate-300 mb-2">Solo Save</h4>
+                            <div id="resume-local-content" class="text-[12px] text-slate-400">No local solo save found yet.</div>
                         </div>
 
                         <div id="saved-multiplayer-panel" class="hidden mt-4 bg-slate-900/55 border border-slate-700 rounded-xl p-3 text-left">
@@ -765,17 +780,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     resizeBoard();
 
 
-    // Automatically initialize layout to 'local' configuration on startup
+    // Initialize startup flow: default New Game -> Just Me
+    setStartupAction('new');
     selectPlayMode('local');
     
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('room')) {
-        session.roomId = String(urlParams.get('room') || '').toUpperCase();
+        session.roomId = String(urlParams.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
         session.joiningViaLink = true;
         session.isHost = false;
-        document.getElementById('mode-local').classList.add('hidden');
-        document.getElementById('mode-online').innerHTML = "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>";
         selectPlayMode('online');
+        setOnlineIntent('join');
+        const joinInput = document.getElementById('join-room-code');
+        if (joinInput) joinInput.value = session.roomId;
     }
     
     await SupabaseDB.init();
@@ -786,7 +803,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderNicknameSuggestions();
     updateAutosaveIndicator();
     applyConnectionState('Disconnected', false);
-    setOnlineIntent('host');
+    if (!session.joiningViaLink) setOnlineIntent('host');
     setLogFilter('all');
     setPendingActionLabel('Draw');
 
@@ -798,6 +815,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const nicknameInput = document.getElementById('player-nickname');
     if (nicknameInput) {
+        const savedNick = localStorage.getItem('apologies_last_nickname');
+        if (savedNick) nicknameInput.value = savedNick;
         nicknameInput.addEventListener('input', validateNicknameInput);
     }
 
@@ -826,12 +845,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     let saved = await SupabaseDB.loadGameState();
     startupSavedSnapshot = saved;
     if (saved && saved.status === 'playing') {
-        document.getElementById('resume-container').classList.remove('hidden');
+        if (startupAction === 'resume') document.getElementById('resume-container').classList.remove('hidden');
         if (saved.multiplayerMeta && saved.multiplayerMeta.savedAt) {
             updateAutosaveIndicator(saved.multiplayerMeta.savedAt);
         }
     }
-    renderStartupSessionCards();
+    applyStartupFlowUI();
     
     document.addEventListener('fullscreenchange', () => {
         const btnIcon = document.querySelector('#fullscreen-btn i');
@@ -850,6 +869,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 joinRoomByCode();
             }
         });
+    }
+
+    if (session.joiningViaLink) {
+        const nick = (document.getElementById('player-nickname').value || '').trim();
+        if (nick.length >= 2) {
+            session.nickname = nick;
+            setTimeout(() => handleLetsGo(), 120);
+        }
     }
 
     window.addEventListener('popstate', () => {
@@ -972,6 +999,7 @@ let voiceChat = {
 
 let isPaused = false;
 let onlineIntent = 'host';
+let startupAction = 'new';
 let startupFilter = 'all';
 let currentLogFilter = 'all';
 let animationSpeed = 1;
@@ -1019,6 +1047,14 @@ function applyConnectionState(status, allowRetry = false) {
     const banner = document.getElementById('reconnect-banner');
     if (!chip || !banner) return;
 
+    const activeOnlineSession = session.playMode === 'online' && (!!session.roomDbId || !!session.onlineGameId);
+    if (!activeOnlineSession) {
+        chip.className = 'status-chip';
+        chip.innerText = 'Offline';
+        banner.classList.add('hidden');
+        return;
+    }
+
     chip.className = 'status-chip';
     if (status === 'Live') chip.classList.add('status-chip-live');
     if (status === 'Reconnecting') chip.classList.add('status-chip-warn');
@@ -1044,6 +1080,82 @@ function retryRealtimeConnections() {
     applyConnectionState('Reconnecting', true);
 }
 
+function setStartupAction(action) {
+    startupAction = action === 'resume' ? 'resume' : 'new';
+    const btnNew = document.getElementById('startup-new');
+    const btnResume = document.getElementById('startup-resume');
+    if (btnNew && btnResume) {
+        btnNew.className = startupAction === 'new'
+            ? 'flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold ring-2 ring-emerald-400'
+            : 'flex-1 py-3 rounded-xl bg-slate-700 text-slate-300 font-bold border border-slate-600';
+        btnResume.className = startupAction === 'resume'
+            ? 'flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold ring-2 ring-emerald-400'
+            : 'flex-1 py-3 rounded-xl bg-slate-700 text-slate-300 font-bold border border-slate-600';
+    }
+    applyStartupFlowUI();
+}
+
+function applyStartupFlowUI() {
+    const isOnline = session.playMode === 'online';
+    const isResume = startupAction === 'resume';
+
+    const onlineTabs = document.getElementById('startup-online-tabs');
+    const manualJoin = document.getElementById('manual-join-room');
+    const filterRow = document.getElementById('startup-filter-row');
+    const resumeWrap = document.getElementById('resume-container');
+    const resumeLocalPanel = document.getElementById('resume-local-panel');
+    const savedPanel = document.getElementById('saved-multiplayer-panel');
+    const recentPanel = document.getElementById('recent-rooms-panel');
+    const firstTip = document.getElementById('first-time-tip');
+    const btnLetsGo = document.getElementById('btn-lets-go');
+
+    if (onlineTabs) onlineTabs.classList.toggle('hidden', !isOnline);
+    if (firstTip) firstTip.classList.toggle('hidden', !isOnline || localStorage.getItem('apologies_hide_onboarding_tip') === '1');
+    if (manualJoin) manualJoin.classList.toggle('hidden', !(isOnline && startupAction === 'new'));
+
+    if (resumeWrap) resumeWrap.classList.toggle('hidden', !isResume);
+    if (filterRow) filterRow.classList.toggle('hidden', !(isResume && isOnline));
+    if (resumeLocalPanel) resumeLocalPanel.classList.toggle('hidden', !(isResume && !isOnline));
+    if (savedPanel) savedPanel.classList.toggle('hidden', !(isResume && isOnline));
+    if (recentPanel) recentPanel.classList.toggle('hidden', !(isResume && isOnline));
+
+    if (btnLetsGo) {
+        if (!isResume) {
+            btnLetsGo.innerHTML = isOnline
+                ? (onlineIntent === 'join'
+                    ? 'Join Lobby <i class="fa-solid fa-right-to-bracket ml-1 text-sm"></i>'
+                    : 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>')
+                : 'Start Game <i class="fa-solid fa-play ml-1 text-sm"></i>';
+        } else {
+            btnLetsGo.innerHTML = isOnline
+                ? 'Resume Multiplayer <i class="fa-solid fa-clock-rotate-left ml-1 text-sm"></i>'
+                : 'Resume Solo Game <i class="fa-solid fa-clock-rotate-left ml-1 text-sm"></i>';
+        }
+    }
+
+    renderStartupSessionCards();
+    renderLocalResumePanel();
+}
+
+function renderLocalResumePanel() {
+    const target = document.getElementById('resume-local-content');
+    if (!target) return;
+
+    const saved = startupSavedSnapshot;
+    if (!saved || saved.status !== 'playing' || saved.multiplayerMeta) {
+        target.innerHTML = 'No local solo save found yet.';
+        return;
+    }
+
+    target.innerHTML = `
+        <div class="rounded-lg border border-slate-700 bg-slate-800/70 p-2.5">
+            <p class="text-xs font-bold text-slate-200">Local Solo Session</p>
+            <p class="text-[11px] text-slate-400 mt-1">Last active: ${formatRelativeTime(lastAutosaveAt)}</p>
+            <button onclick="resumeGame()" class="mt-2 w-full py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-white text-[11px] font-semibold">Resume</button>
+        </div>
+    `;
+}
+
 function setOnlineIntent(intent) {
     onlineIntent = intent === 'join' ? 'join' : 'host';
     const tabHost = document.getElementById('tab-host');
@@ -1058,6 +1170,7 @@ function setOnlineIntent(intent) {
     }
     const joinInput = document.getElementById('join-room-code');
     if (onlineIntent === 'join' && joinInput) joinInput.focus();
+    applyStartupFlowUI();
 }
 
 function dismissFirstTimeTip(neverShow) {
@@ -1179,11 +1292,21 @@ function renderStartupSessionCards() {
     const filterRow = document.getElementById('startup-filter-row');
     if (!wrap || !list || !filterRow) return;
 
+    if (startupAction !== 'resume') {
+        wrap.classList.add('hidden');
+        filterRow.classList.add('hidden');
+        return;
+    }
+
     const cards = getUnifiedStartupSessions();
-    let filtered = cards;
-    if (startupFilter === 'mine') filtered = cards.filter(c => c.mine);
-    if (startupFilter === 'active') filtered = cards.filter(c => c.state === 'active');
-    if (startupFilter === 'waiting') filtered = cards.filter(c => c.state === 'waiting');
+    const modeFiltered = session.playMode === 'online'
+        ? cards.filter(c => c.mode !== 'Local Save')
+        : cards.filter(c => c.mode === 'Local Save');
+
+    let filtered = modeFiltered;
+    if (startupFilter === 'mine') filtered = modeFiltered.filter(c => c.mine);
+    if (startupFilter === 'active') filtered = modeFiltered.filter(c => c.state === 'active');
+    if (startupFilter === 'waiting') filtered = modeFiltered.filter(c => c.state === 'waiting');
 
     if (!filtered.length) {
         list.innerHTML = `
@@ -1192,7 +1315,7 @@ function renderStartupSessionCards() {
             </div>
         `;
         wrap.classList.remove('hidden');
-        filterRow.classList.remove('hidden');
+        if (session.playMode === 'online') filterRow.classList.remove('hidden');
         return;
     }
 
@@ -1225,7 +1348,7 @@ function renderStartupSessionCards() {
     }).join('');
 
     wrap.classList.remove('hidden');
-    filterRow.classList.remove('hidden');
+    if (session.playMode === 'online') filterRow.classList.remove('hidden');
 }
 
 function updateRoomStatusChips() {
@@ -1385,7 +1508,9 @@ function clearRoomQueryParam() {
 }
 
 function buildRoomUrl(roomCode) {
-    return window.location.protocol + '//' + window.location.host + window.location.pathname + '?room=' + roomCode;
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomCode);
+    return `${url.origin}${url.pathname}?${url.searchParams.toString()}`;
 }
 
 function setRoomQueryParam(roomCode, push = true) {
@@ -1548,7 +1673,7 @@ function renderHostedSessionsList() {
     if (!hostedSessions.length) {
         panel.classList.remove('hidden');
         list.innerHTML = `<div class="rounded-lg border border-dashed border-slate-600 bg-slate-900/40 p-3 text-center text-slate-400 text-xs"><i class="fa-regular fa-circle-play mr-1"></i> No hosted rooms yet.</div>`;
-        renderStartupSessionCards();
+        applyStartupFlowUI();
         return;
     }
 
@@ -1582,7 +1707,7 @@ function renderHostedSessionsList() {
         `;
     }).join('');
 
-    renderStartupSessionCards();
+    applyStartupFlowUI();
 }
 
 async function refreshStartupHostedSessions() {
@@ -1703,7 +1828,7 @@ function renderRecentRoomsList() {
             panel.classList.remove('hidden');
             list.innerHTML = `<div class="rounded-lg border border-dashed border-slate-600 bg-slate-900/40 p-3 text-center text-slate-400 text-xs"><i class="fa-regular fa-compass mr-1"></i> No recent rooms yet.</div>`;
         }
-        renderStartupSessionCards();
+        applyStartupFlowUI();
         return;
     }
 
@@ -1740,7 +1865,7 @@ function renderRecentRoomsList() {
         `;
     }).join('');
 
-    renderStartupSessionCards();
+    applyStartupFlowUI();
 }
 
 async function refreshStartupRecentRooms() {
@@ -2020,7 +2145,6 @@ function selectPlayMode(mode) {
         nicknameSection.classList.add('hidden', 'opacity-0');
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1';
-        btnLetsGo.innerHTML = 'Start Game <i class="fa-solid fa-play ml-1 text-sm"></i>';
         if (joinManual) joinManual.classList.add('hidden');
         if (recentPanel) recentPanel.classList.add('hidden');
         
@@ -2037,25 +2161,38 @@ function selectPlayMode(mode) {
         nicknameSection.classList.remove('hidden', 'opacity-0');
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1';
-        btnLetsGo.innerHTML = onlineIntent === 'join'
-            ? 'Join Lobby <i class="fa-solid fa-right-to-bracket ml-1 text-sm"></i>'
-            : 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>';
         if (joinManual) joinManual.classList.remove('hidden');
         renderRecentRoomsList();
         
         buildPlayerConfigUI();
     }
 
+    applyStartupFlowUI();
     updateVoiceButtonUI();
 }
 
 async function handleLetsGo() {
+    if (startupAction === 'resume') {
+        if (session.playMode === 'online') {
+            const cards = getUnifiedStartupSessions().filter(c => c.mode !== 'Local Save');
+            if (!cards.length) {
+                showToast('No multiplayer sessions to resume yet.', 'fa-circle-info');
+                return;
+            }
+            const preferred = cards.find(c => c.mode === 'Host') || cards[0];
+            if (preferred.mode === 'Host') return resumeHostedSession(preferred.dbId);
+            return rejoinRecentRoom(preferred.dbId);
+        }
+        return resumeGame();
+    }
+
     if (session.playMode === 'online') {
         const nameInput = document.getElementById('player-nickname').value.trim();
         if (!validateNicknameInput()) return showToast('Please enter a valid nickname!', 'fa-triangle-exclamation');
         if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
         
         session.nickname = nameInput;
+        localStorage.setItem('apologies_last_nickname', session.nickname);
 
         if (onlineIntent === 'join') {
             const codeInput = document.getElementById('join-room-code');
@@ -2078,12 +2215,24 @@ async function preflightJoinRoom(code) {
     if (!SupabaseDB.client) {
         return { ok: false, message: 'No connection to multiplayer server.' };
     }
-    const { data: room, error } = await SupabaseDB.client
+
+    let { data: room, error } = await SupabaseDB.client
         .schema('Apologies')
         .from('rooms')
         .select('id,status,room_code')
         .eq('room_code', code)
         .maybeSingle();
+
+    if (!room) {
+        const fallback = await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .select('id,status,room_code')
+            .ilike('room_code', code)
+            .maybeSingle();
+        room = fallback.data;
+        if (!error) error = fallback.error;
+    }
 
     if (error || !room) return { ok: false, message: 'Room not found. Check the room code.' };
     if (!['waiting', 'active'].includes(room.status)) return { ok: false, message: 'Room is not joinable right now.' };
@@ -2101,8 +2250,8 @@ async function joinRoomByCode() {
         return;
     }
 
-    if (!code || code.length < 4) {
-        showToast('Enter a valid room code.', 'fa-triangle-exclamation');
+    if (!code || code.length !== 6) {
+        showToast('Enter a valid 6-character room code.', 'fa-triangle-exclamation');
         return;
     }
 
@@ -2116,6 +2265,7 @@ async function joinRoomByCode() {
     }
 
     session.nickname = nickname;
+    localStorage.setItem('apologies_last_nickname', session.nickname);
     session.playMode = 'online';
     session.roomId = code;
     session.roomDbId = null;
