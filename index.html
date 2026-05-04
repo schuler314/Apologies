@@ -92,6 +92,7 @@
         #board-wrap {
             perspective: 1600px;
             overflow: visible;
+            background: radial-gradient(circle at 50% 50%, #1e293b 0%, #020617 100%);
         }
 
         #board {
@@ -115,37 +116,54 @@
 
         .cell {
             position: absolute;
-            border: 1px solid rgba(0,0,0,0.11);
-            border-radius: 5px;
-            box-shadow: inset 0 1px 2px rgba(255,255,255,0.65), inset 0 -1px 2px rgba(0,0,0,0.07);
+            border: 1px solid rgba(212, 185, 150, 0.45);
+            border-radius: 3px;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.03);
+            transform-style: preserve-3d;
         }
 
         .pawn {
             position: absolute;
-            width: 30px;
-            height: 30px;
-            border-radius: 999px;
+            width: 6.25%;
+            height: 6.25%;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
             transform-origin: bottom center;
             transform: translateZ(4px) rotateX(-45deg);
-            box-shadow:
-                0 5px 10px rgba(0,0,0,0.5),
-                0 2px 3px rgba(0,0,0,0.3),
-                inset 0 -3px 5px rgba(0,0,0,0.28);
-            transition: left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1), transform 220ms ease;
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), margin 0.4s ease, left 0.4s ease, top 0.4s ease;
             z-index: 40;
-            overflow: hidden;
+            cursor: pointer;
+            pointer-events: auto;
         }
 
-        .pawn::after {
+        .pawn:hover {
+            z-index: 55;
+        }
+
+        .pawn::before {
             content: '';
             position: absolute;
-            top: 3px;
-            left: 5px;
-            width: 9px;
-            height: 7px;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.52);
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 80px;
+            background: transparent;
+            z-index: 1;
+        }
+
+        .pawn i {
+            font-size: clamp(26px, 4.8vmin, 40px);
+            -webkit-text-stroke: 1.5px rgba(255,255,255,0.95);
+            filter: drop-shadow(0 8px 4px rgba(0,0,0,0.6));
             pointer-events: none;
+            z-index: 2;
+            transition: transform 0.2s ease;
+        }
+
+        .pawn:hover i {
+            transform: scale(1.15);
         }
 
         .playing-card {
@@ -168,7 +186,8 @@
 
         #active-card {
             aspect-ratio: 5 / 7;
-            max-width: 96px;
+            width: clamp(78px, 10vw, 96px);
+            min-height: 132px;
             margin-left: auto;
             margin-right: auto;
             background: #ffffff !important;
@@ -177,10 +196,27 @@
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28);
             opacity: 1;
             transform: scale(1);
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 8px 6px;
+        }
+
+        #active-card-value {
+            font-family: 'Fredoka', sans-serif;
+            font-size: clamp(2.1rem, 5.2vmin, 2.9rem);
+            line-height: 1;
+            color: #1e293b;
+            margin-bottom: 2px;
         }
 
         #active-card-desc {
             color: #475569 !important;
+            font-size: 10px;
+            line-height: 1.25;
         }
 
         #move-modal .glass {
@@ -188,18 +224,34 @@
             background: #ffffff;
             color: #0f172a;
             box-shadow: 0 26px 64px rgba(0, 0, 0, 0.5);
+            border-radius: 24px;
         }
 
         #move-modal .glass #modal-card-desc {
             color: #475569;
         }
 
-        .side-scroll {
-            scrollbar-width: thin;
-            scrollbar-color: rgba(141, 174, 190, 0.45) transparent;
+        #modal-card-value {
+            font-family: 'Fredoka', sans-serif;
+            font-size: clamp(4.5rem, 12vw, 7rem);
+            line-height: 1;
+            color: #1e293b;
+        }
+
+        #modal-card-desc {
+            font-size: 0.96rem;
+            line-height: 1.35;
+        }
+
+        #move-options button {
+            border-radius: 12px;
+            border: 1px solid #334155;
+            background: #1e293b;
+            color: #e2e8f0;
         }
 
         .side-scroll::-webkit-scrollbar { width: 7px; }
+        .side-scroll::-webkit-scrollbar-track { background: transparent; }
         .side-scroll::-webkit-scrollbar-thumb { background: rgba(141, 174, 190, 0.42); border-radius: 999px; }
 
         .hidden-soft { display: none !important; }
@@ -289,7 +341,7 @@
                         <div id="resume-online-list" class="space-y-2 max-h-52 overflow-y-auto side-scroll"></div>
                     </div>
 
-                    <div id="dev-tools" class="mt-4 border border-slate-600/50 rounded-xl p-3 bg-slate-900/50">
+                    <div id="dev-tools" class="hidden-soft mt-4 border border-slate-600/50 rounded-xl p-3 bg-slate-900/50">
                         <div class="flex items-center justify-between gap-2">
                             <p class="text-[11px] uppercase tracking-[0.12em] text-slate-300">Stability Harness</p>
                             <button class="btn-secondary rounded px-2 py-1 text-[11px] font-semibold" onclick="Debug.runAll()">Run Self-tests</button>
@@ -1262,7 +1314,7 @@
                 // ── Center decoration ────────────────────────────────
                 const center = document.createElement('div');
                 center.style.cssText = `position:absolute;left:${3.5*cp}%;top:${3.5*cp}%;width:${9*cp}%;height:${9*cp}%;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none;`;
-                center.innerHTML = `<div style="text-align:center;transform:rotate(-6deg)"><div style="font-family:'Space Grotesk',sans-serif;font-weight:900;color:#6b4a1e;opacity:0.38;line-height:1.15;font-size:clamp(10px,2.2vmin,22px)">APOLOGIES!</div></div>`;
+                center.innerHTML = `<div style="text-align:center;transform:rotate(-6deg)"><div style="font-family:'Fredoka',sans-serif;font-weight:700;color:#6b4a1e;opacity:0.32;line-height:1.15;font-size:clamp(10px,2.2vmin,22px)">APOLOGIES!</div></div>`;
                 board.appendChild(center);
 
                 // ── Track cells ──────────────────────────────────────
@@ -1347,7 +1399,7 @@
                     const W = 3.0;
                     const start = document.createElement('div');
                     start.style.cssText = `position:absolute;left:${(s.x-W/2)*cp}%;top:${(s.y-W/2)*cp}%;width:${W*cp}%;height:${W*cp}%;border-radius:50%;background:radial-gradient(circle at 38% 34%, ${light}, ${hex} 56%, ${dark});border:3px solid ${hex}dd;box-shadow:0 4px 14px ${hex}55,inset 0 2px 5px rgba(255,255,255,0.38);display:flex;align-items:center;justify-content:center;z-index:4;overflow:hidden;`;
-                    start.innerHTML = `<span style="color:rgba(255,255,255,0.85);font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:clamp(7px,1.4vmin,14px);letter-spacing:0.04em;text-shadow:0 1px 2px rgba(0,0,0,0.4)">START</span>`;
+                    start.innerHTML = `<span style="color:rgba(255,255,255,0.85);font-family:'Fredoka',sans-serif;font-weight:700;font-size:clamp(7px,1.4vmin,14px);letter-spacing:0.04em;text-shadow:0 1px 2px rgba(0,0,0,0.4)">START</span>`;
                     start.id = `cell-start-${color}`;
                     board.appendChild(start);
                 });
@@ -1360,7 +1412,7 @@
                     const W = 2.5;
                     const home = document.createElement('div');
                     home.style.cssText = `position:absolute;left:${(h.x-W/2)*cp}%;top:${(h.y-W/2)*cp}%;width:${W*cp}%;height:${W*cp}%;border-radius:50%;background:radial-gradient(circle at 38% 34%, ${light}bb, ${hex}88 55%, ${dark}66);border:2px solid ${hex}99;box-shadow:0 2px 8px ${hex}44;display:flex;align-items:center;justify-content:center;z-index:4;`;
-                    home.innerHTML = `<span style="color:rgba(255,255,255,0.92);font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:clamp(6px,1.2vmin,12px);text-shadow:0 1px 2px rgba(0,0,0,0.5)">HOME</span>`;
+                    home.innerHTML = `<span style="color:rgba(255,255,255,0.92);font-family:'Fredoka',sans-serif;font-weight:700;font-size:clamp(6px,1.2vmin,12px);text-shadow:0 1px 2px rgba(0,0,0,0.5)">HOME</span>`;
                     home.id = `cell-home-${color}`;
                     board.appendChild(home);
                 });
@@ -1376,7 +1428,8 @@
                     player.pawns.forEach((pawn, idx) => {
                         const p = document.createElement('div');
                         p.className = 'pawn';
-                        p.style.background = `radial-gradient(circle at 38% 32%, ${light}, ${mid} 55%, ${dark})`;
+                        p.style.background = 'transparent';
+                        p.innerHTML = `<i class="fa-solid fa-chess-pawn" style="color:${mid};"></i>`;
                         p.id = `pawn-${player.color}-${idx}`;
 
                         const pos = pawnToPixel(player.color, pawn, idx, cell);
