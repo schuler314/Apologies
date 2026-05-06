@@ -1006,9 +1006,7 @@ let onlineSync = {
     gameChannel: null,
     applyingRemote: false,
     lastStateHash: '',
-    lastRemoteUpdatedAt: null,
-    pushInFlight: false,
-    pendingPush: false
+    lastRemoteUpdatedAt: null
 };
 
 let voiceChat = {
@@ -1034,8 +1032,6 @@ let roomTimeline = {
     finishedAt: null
 };
 let lastUserInteractionAt = Date.now();
-let turnTransitionToken = 0;
-let moveCommitLock = false;
 
 const NICKNAME_SUGGESTIONS = ['Swift Fox', 'Lucky Nova', 'Board Ace', 'Calm Comet', 'Dice Ranger'];
 
@@ -1810,30 +1806,62 @@ async function refreshStartupRecentRooms() {
 }
 
 async function rejoinRecentRoom(roomDbId) {
-    const roomData = recentRoomMap[roomDbId];
-    if (!roomData) {
-        showToast('Room not found. Try refreshing.', 'fa-triangle-exclamation');
-        return;
+    try {
+        const roomData = recentRoomMap[roomDbId];
+        if (!roomData) {
+            return showToast('Room not found. Try refreshing.', 'fa-triangle-exclamation');
+        }
+
+        const nickname = document.getElementById('player-nickname').value.trim();
+        if (!nickname) {
+            return showToast('Enter your nickname first.', 'fa-triangle-exclamation');
+        }
+
+        await SupabaseDB.init();
+        session.userId = SupabaseDB.userId;
+
+        if (!SupabaseDB.client || !session.userId) {
+            return showToast('Multiplayer requires Supabase connection.', 'fa-triangle-exclamation');
+        }
+
+        await upsertMyProfile();
+        session.nickname = nickname;
+        session.roomDbId = roomData.id;
+        session.roomId = roomData.room_code;
+        session.isHost = false;
+        session.onlineGameId = null;
+
+        // Show lobby UI
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('lobby-section').classList.remove('hidden');
+        document.getElementById('lobby-section').classList.add('flex');
+        
+        configureLobbyRoleUI();
+
+        // Join as player
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('room_players')
+            .upsert({
+                room_id: session.roomDbId,
+                user_id: session.userId,
+                is_host: false,
+                joined_at: new Date().toISOString(),
+                left_at: null
+            }, { onConflict: 'room_id,user_id' });
+
+        // Load players and subscribe
+        await refreshLobbyPlayersFromDB();
+        subscribeLobbyRealtime();
+        updateVoiceButtonUI();
+        updateRoomStatusChips();
+        await checkForActiveOnlineGame();
+        
+        showToast('Joined room!', 'fa-check');
+    } catch (err) {
+        console.error('rejoinRecentRoom error:', err);
+        showToast(`Failed to rejoin room: ${err?.message || err}`, 'fa-triangle-exclamation');
     }
-
-    const nickname = document.getElementById('player-nickname').value.trim();
-    if (!nickname) {
-        showToast('Enter your nickname first.', 'fa-triangle-exclamation');
-        return;
-    }
-
-    session.nickname = nickname;
-    session.playMode = 'online';
-    session.roomId = roomData.room_code;
-    session.roomDbId = null;
-    session.onlineGameId = null;
-    session.isHost = false;
-    session.joiningViaLink = true;
-
-    setRoomQueryParam(session.roomId, false);
-    selectPlayMode('online');
-    updateRoomStatusChips();
-    await setupOnlineLobby();
 }
 
 async function resumeHostedSession(roomDbId) {
@@ -2061,38 +2089,39 @@ function selectPlayMode(mode) {
     const recentPanel = document.getElementById('recent-rooms-panel');
     
     if (mode === 'local') {
-        btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
-        btnOnline.innerHTML = "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
-
+        // LOCAL MODE: Just Me
         btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(5,150,105,0.4)] ring-2 ring-emerald-400 transform hover:-translate-y-0.5';
         btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
         
-        // Hide Nickname Input For "Just Me" Local Mode
+        btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
+        btnOnline.innerHTML = "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
+        
         nicknameSection.classList.add('hidden', 'opacity-0');
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(16,185,129,0.6)] transition-all transform hover:-translate-y-1';
         btnLetsGo.innerHTML = 'Start Game <i class="fa-solid fa-play ml-1 text-sm"></i>';
+        
         if (joinManual) joinManual.classList.add('hidden');
         if (recentPanel) recentPanel.classList.add('hidden');
         
         buildPlayerConfigUI();
     } else {
-        btnOnline.innerHTML = session.joiningViaLink
-            ? "Joining Room... <i class='fa-solid fa-spinner fa-spin ml-1'></i>"
-            : "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
-
+        // ONLINE MODE: Friends
         btnOnline.className = 'flex-1 py-3.5 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-[0_4px_15px_rgba(37,99,235,0.4)] ring-2 ring-blue-400 transform hover:-translate-y-0.5';
         btnLocal.className = 'flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-300 font-bold transition-all hover:bg-slate-600 transform hover:-translate-y-0.5 border border-slate-600';
         
-        // Show Nickname Input For Friends Mode
+        btnOnline.innerHTML = "Friends <i class='fa-solid fa-users ml-1 opacity-70'></i>";
+        btnLocal.innerHTML = "Just Me <i class='fa-solid fa-user ml-1 opacity-70'></i>";
+        
         nicknameSection.classList.remove('hidden', 'opacity-0');
         
         btnLetsGo.className = 'w-full mt-6 py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-xl font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1';
         btnLetsGo.innerHTML = onlineIntent === 'join'
             ? 'Join Lobby <i class="fa-solid fa-right-to-bracket ml-1 text-sm"></i>'
             : 'Create Lobby <i class="fa-solid fa-arrow-right ml-1 text-sm"></i>';
+        
         if (joinManual) joinManual.classList.remove('hidden');
-        renderRecentRoomsList();
+        if (recentPanel) renderRecentRoomsList();
         
         buildPlayerConfigUI();
     }
@@ -2101,82 +2130,31 @@ function selectPlayMode(mode) {
 }
 
 async function handleLetsGo() {
-    if (session.playMode === 'online') {
+    if (session.playMode === 'local') {
+        // LOCAL MODE: Just start the game immediately
+        session.nickname = 'You';
+        startGame();
+    } else {
+        // ONLINE MODE
         const nameInput = document.getElementById('player-nickname').value.trim();
-        if (!validateNicknameInput()) return showToast('Please enter a valid nickname!', 'fa-triangle-exclamation');
-        if (!nameInput) return showToast('Please enter a nickname!', 'fa-triangle-exclamation');
+        if (!validateNicknameInput() || !nameInput) {
+            return showToast('Please enter a valid nickname!', 'fa-triangle-exclamation');
+        }
         
         session.nickname = nameInput;
 
         if (onlineIntent === 'join') {
+            // Join existing room by code
             const codeInput = document.getElementById('join-room-code');
             if (!codeInput || !codeInput.value.trim()) {
-                return showToast('Enter room code to join existing lobby.', 'fa-triangle-exclamation');
+                return showToast('Enter a room code to join.', 'fa-triangle-exclamation');
             }
             return joinRoomByCode();
+        } else {
+            // Create new room
+            return createAndEnterLobby();
         }
-
-        session.joiningViaLink = false;
-        await setupOnlineLobby();
-    } else {
-        // "JUST ME" FLOW: Skip lobby, skip nickname, start instantly!
-        session.nickname = 'You';
-        startGame(); 
     }
-}
-
-async function preflightJoinRoom(code) {
-    if (!SupabaseDB.client) {
-        return { ok: false, message: 'No connection to multiplayer server.' };
-    }
-    const { data: room, error } = await SupabaseDB.client
-        .schema('Apologies')
-        .from('rooms')
-        .select('id,status,room_code')
-        .eq('room_code', code)
-        .maybeSingle();
-
-    if (error || !room) return { ok: false, message: 'Room not found. Check the room code.' };
-    if (!['waiting', 'active'].includes(room.status)) return { ok: false, message: 'Room is not joinable right now.' };
-    return { ok: true, room };
-}
-
-async function joinRoomByCode() {
-    const input = document.getElementById('join-room-code');
-    const nickname = document.getElementById('player-nickname').value.trim();
-    const codeRaw = (input ? input.value : '').trim();
-    const code = codeRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-    if (!nickname || !validateNicknameInput()) {
-        showToast('Enter your nickname first.', 'fa-triangle-exclamation');
-        return;
-    }
-
-    if (!code || code.length < 4) {
-        showToast('Enter a valid room code.', 'fa-triangle-exclamation');
-        return;
-    }
-
-    const preflight = await preflightJoinRoom(code);
-    if (!preflight.ok) {
-        showToast(preflight.message, 'fa-triangle-exclamation', {
-            retryLabel: 'Retry',
-            onRetry: joinRoomByCode
-        });
-        return;
-    }
-
-    session.nickname = nickname;
-    session.playMode = 'online';
-    session.roomId = code;
-    session.roomDbId = null;
-    session.onlineGameId = null;
-    session.isHost = false;
-    session.joiningViaLink = true;
-
-    setRoomQueryParam(session.roomId, false);
-    selectPlayMode('online');
-    await setupOnlineLobby();
 }
 
 async function upsertMyProfile() {
@@ -2351,17 +2329,11 @@ function subscribeToGameRealtime() {
 async function pushOnlineGameState(reason = '') {
     if (!isOnlineGame() || onlineSync.applyingRemote || !SupabaseDB.client) return;
 
-    if (onlineSync.pushInFlight) {
-        onlineSync.pendingPush = true;
-        return;
-    }
-
     const hashed = stateHash(gameState);
     if (!hashed || hashed === onlineSync.lastStateHash) return;
+    
     const previousHash = onlineSync.lastStateHash;
     onlineSync.lastStateHash = hashed;
-    onlineSync.pushInFlight = true;
-    onlineSync.pendingPush = false;
 
     const activeColor = gameState.players[gameState.turn] ? gameState.players[gameState.turn].color : null;
     const sentAt = new Date().toISOString();
@@ -2383,14 +2355,6 @@ async function pushOnlineGameState(reason = '') {
         console.warn('pushOnlineGameState failed:', reason, error.message);
     } else {
         onlineSync.lastRemoteUpdatedAt = sentAt;
-    }
-
-    onlineSync.pushInFlight = false;
-    if (onlineSync.pendingPush) {
-        onlineSync.pendingPush = false;
-        setTimeout(() => {
-            pushOnlineGameState(`${reason}:queued`);
-        }, 0);
     }
 }
 
@@ -2459,7 +2423,7 @@ function applyActiveTurnUI() {
     }
 }
 
-async function setupOnlineLobby() {
+async function createAndEnterLobby() {
     try {
         await SupabaseDB.init();
         session.userId = SupabaseDB.userId;
@@ -2471,67 +2435,27 @@ async function setupOnlineLobby() {
 
         await upsertMyProfile();
 
-        document.getElementById('auth-section').classList.add('hidden');
-        document.getElementById('lobby-section').classList.remove('hidden');
-        document.getElementById('lobby-section').classList.add('flex');
-        configureLobbyRoleUI();
-
-        if (session.joiningViaLink && session.roomId) {
-
-            const { data: room, error: roomErr } = await SupabaseDB.client
-                .schema('Apologies')
-                .from('rooms')
-                .select('id, room_code, host_user_id, status, created_at')
-                .eq('room_code', session.roomId)
-                .maybeSingle();
-
-            if (roomErr || !room) {
-                throw new Error('Room not found. Check the invite link.');
-            }
-            if (!['waiting', 'active'].includes(room.status)) {
-                throw new Error('Room is closed or not joinable.');
-            }
-
-            session.roomDbId = room.id;
-            session.roomId = room.room_code;
-            session.isHost = room.host_user_id === session.userId;
-            session.joiningViaLink = false;
-            updateRoomTimeline({ createdAt: room.created_at || new Date().toISOString(), startedAt: null, savedAt: null, finishedAt: null });
-            if (session.isHost) setRoomQueryParam(session.roomId, false);
-            configureLobbyRoleUI();
-
-            await SupabaseDB.client
-                .schema('Apologies')
-                .from('room_players')
-                .upsert({
-                    room_id: session.roomDbId,
-                    user_id: session.userId,
-                    is_host: session.isHost,
-                    joined_at: new Date().toISOString(),
-                    left_at: null
-                }, { onConflict: 'room_id,user_id' });
-
-            await refreshLobbyPlayersFromDB();
-            subscribeLobbyRealtime();
-            await checkForActiveOnlineGame();
-            updateVoiceButtonUI();
-            await refreshStartupHostedSessions();
-            updateRoomStatusChips();
-            showToast('Connected to Room!');
-            return;
+        // Create new room
+        const room = await createOnlineRoom();
+        if (!room || !room.id) {
+            throw new Error('Failed to create room.');
         }
 
-        const room = await createOnlineRoom();
         session.roomDbId = room.id;
         session.roomId = room.room_code;
         session.isHost = true;
-        session.joiningViaLink = false;
-        updateRoomTimeline({ createdAt: new Date().toISOString(), startedAt: null, savedAt: null, finishedAt: null });
-        configureLobbyRoleUI();
+        session.onlineGameId = null;
 
+        // Show lobby UI
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('lobby-section').classList.remove('hidden');
+        document.getElementById('lobby-section').classList.add('flex');
+        
+        configureLobbyRoleUI();
         setRoomQueryParam(session.roomId, true);
         updateLobbyInviteArtifacts();
 
+        // Join as player
         await SupabaseDB.client
             .schema('Apologies')
             .from('room_players')
@@ -2543,42 +2467,92 @@ async function setupOnlineLobby() {
                 left_at: null
             }, { onConflict: 'room_id,user_id' });
 
+        // Load players and subscribe
         await refreshLobbyPlayersFromDB();
         subscribeLobbyRealtime();
         updateVoiceButtonUI();
         await refreshStartupHostedSessions();
         updateRoomStatusChips();
+        
+        showToast('Room created! Waiting for friends to join...', 'fa-check');
     } catch (err) {
-        console.error('setupOnlineLobby error:', err);
-        showToast(`Unable to set up online lobby: ${err?.message || err}`, 'fa-triangle-exclamation', {
-            retryLabel: 'Retry',
-            onRetry: setupOnlineLobby
-        });
+        console.error('createAndEnterLobby error:', err);
+        showToast(`Failed to create room: ${err?.message || err}`, 'fa-triangle-exclamation');
+        selectPlayMode('online');
+    }
+}
 
-        document.getElementById('auth-section').classList.remove('hidden');
-        document.getElementById('lobby-section').classList.add('hidden');
-        document.getElementById('lobby-section').classList.remove('flex');
+async function joinRoomByCode() {
+    try {
+        const input = document.getElementById('join-room-code');
+        const codeRaw = (input ? input.value : '').trim();
+        const code = codeRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-        if (onlineSync.lobbyChannel && SupabaseDB.client) {
-            SupabaseDB.client.removeChannel(onlineSync.lobbyChannel);
+        if (!code || code.length < 4) {
+            return showToast('Enter a valid room code.', 'fa-triangle-exclamation');
         }
-        onlineSync.lobbyChannel = null;
-        session.roomDbId = null;
+
+        await SupabaseDB.init();
+        session.userId = SupabaseDB.userId;
+
+        if (!SupabaseDB.client || !session.userId) {
+            return showToast('Multiplayer requires Supabase connection.', 'fa-triangle-exclamation');
+        }
+
+        // Find room by code
+        const { data: room, error: roomErr } = await SupabaseDB.client
+            .schema('Apologies')
+            .from('rooms')
+            .select('id, room_code, status')
+            .eq('room_code', code)
+            .maybeSingle();
+
+        if (roomErr || !room) {
+            return showToast('Room not found. Check the room code.', 'fa-triangle-exclamation');
+        }
+
+        if (!['waiting', 'active'].includes(room.status)) {
+            return showToast('This room is not joinable right now.', 'fa-triangle-exclamation');
+        }
+
+        await upsertMyProfile();
+
+        session.roomDbId = room.id;
+        session.roomId = room.room_code;
+        session.isHost = false;
         session.onlineGameId = null;
-        session.players = [];
-        updateRoomTimeline({ createdAt: null, playersJoined: 0, startedAt: null, savedAt: null, finishedAt: null });
+
+        // Show lobby UI
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('lobby-section').classList.remove('hidden');
+        document.getElementById('lobby-section').classList.add('flex');
+        
+        configureLobbyRoleUI();
+
+        // Join as player
+        await SupabaseDB.client
+            .schema('Apologies')
+            .from('room_players')
+            .upsert({
+                room_id: session.roomDbId,
+                user_id: session.userId,
+                is_host: false,
+                joined_at: new Date().toISOString(),
+                left_at: null
+            }, { onConflict: 'room_id,user_id' });
+
+        // Load players and subscribe
+        await refreshLobbyPlayersFromDB();
+        subscribeLobbyRealtime();
         updateVoiceButtonUI();
-
-        if (session.roomId && !session.roomDbId) {
-            session.roomId = null;
-            session.isHost = false;
-            session.joiningViaLink = false;
-            restoreModeButtonsFromJoinState();
-            clearRoomQueryParam();
-            selectPlayMode('online');
-        }
-
-        await refreshStartupHostedSessions();
+        updateRoomStatusChips();
+        await checkForActiveOnlineGame();
+        
+        showToast('Joined room!', 'fa-check');
+    } catch (err) {
+        console.error('joinRoomByCode error:', err);
+        showToast(`Failed to join room: ${err?.message || err}`, 'fa-triangle-exclamation');
+        selectPlayMode('online');
     }
 }
 
@@ -3477,7 +3451,6 @@ function startTurn() {
     }
     
     gameState.status = 'playing';
-    moveCommitLock = false;
     let activePlayer = gameState.players[gameState.turn];
     if (!activePlayer) return;
     let banner = document.getElementById('turn-banner');
@@ -4187,16 +4160,15 @@ function checkWinCondition() {
     return false;
 }
 
-function endTurn(drawAgain, token = null) {
-    if (token !== null && token !== turnTransitionToken) return;
+function endTurn(drawAgain) {
     if (gameState.status === 'gameover') return;
     if (isPaused) {
-        setTimeout(() => endTurn(drawAgain, token), scaledDelay(500)); 
+        setTimeout(() => endTurn(drawAgain), scaledDelay(500)); 
         return;
     }
     if (!drawAgain) gameState.turn = (gameState.turn + 1) % gameState.players.length;
     
-    gameState.status = 'playing'; // Re-open game state locks 
+    gameState.status = 'playing';
     pushOnlineGameState('endTurn');
     startTurn();
 }
